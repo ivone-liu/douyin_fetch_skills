@@ -3,8 +3,8 @@ name: douyin-subscription-manager
 description: Manage Douyin account subscriptions through TikHub. Use when the user asks to subscribe to a Douyin creator, unsubscribe from one, check whether an account is already subscribed, sync a local subscription list with TikHub, or maintain a watchlist of creators for later crawling.
 compatibility: Works best in environments with TikHub API access, outbound network access, secure secret storage for TIKHUB_API_TOKEN, and a writable local file system for a subscription registry.
 metadata:
-  author: Ivone(ivone@nibbly.cn)
-  version: 1.0.0
+  author: OpenAI
+  version: 1.1.0
   category: workflow-automation
   upstream: tikhub-douyin
 ---
@@ -26,8 +26,9 @@ This skill is the control layer for creator tracking. It should:
 1. resolve the creator identity into a stable identifier
 2. decide whether the action is add, remove, list, or verify
 3. execute the TikHub interaction only when credentials and required identifiers are present
-4. update the local subscription registry after a successful remote action
-5. return a compact, auditable result
+4. capture the user's subscription mode for later crawling
+5. update the local subscription registry after a successful remote action
+6. return a compact, auditable result
 
 This skill should not crawl all videos or analyze creative techniques. Hand those tasks to the dedicated skills.
 
@@ -51,6 +52,12 @@ Classify the request as one of:
 - list
 - verify
 - sync-local-registry
+
+If the operation is `subscribe`, also determine the **subscription mode**:
+- `backfill_all`: backfill all historical videos after subscription
+- `latest_only`: do not backfill history, only track new posts from now on
+
+Default to `backfill_all` unless the user explicitly wants only future content.
 
 If the request mixes operations, execute them in a safe order:
 1. resolve identities
@@ -102,6 +109,12 @@ Each item should contain:
 - `unique_id`
 - `uid`
 - `status`, either `subscribed` or `unsubscribed`
+- `subscription_mode`, either `backfill_all` or `latest_only`
+- `subscription_started_at`
+- `backfill_completed_at`, nullable
+- `latest_seen_create_time`, nullable
+- `last_sync_cursor`, nullable
+- `last_synced_at`, nullable
 - `source`, such as manual, imported, or synced
 - `created_at`
 - `updated_at`
@@ -136,7 +149,10 @@ For bulk actions, use this structure for each creator:
 
 ## Hand-off rules
 
-After a successful subscribe, suggest the video crawling skill when the user wants all posts.
+After a successful subscribe:
+- if `subscription_mode = backfill_all`, hand off to the video harvester for immediate full crawl
+- if `subscription_mode = latest_only`, do not force an immediate full crawl; instead record the baseline time and use incremental sync later
+
 After crawling is complete, suggest the analysis skill when the user wants a reusable knowledge base.
 
 ## Recommended local file layout

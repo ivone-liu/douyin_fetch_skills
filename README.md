@@ -76,6 +76,50 @@ openclaw-douyin-skills/
 
 这 4 步里，**第 3 步是关键分水岭**。如果第 3 步只是写一篇泛泛的总结，你后面的脚本生成就会变成空转。只有当知识库是结构化、可追溯、可更新的，第 4 步才有意义。
 
+## 订阅后的抓取模式
+
+这次又补了一层关键策略：**订阅**和**抓取策略**分开，但在注册表里强绑定。
+
+用户在订阅账号后，可以选择两种模式：
+
+- `backfill_all`：首次订阅后，回补该账号全部历史视频，再进入后续增量同步
+- `latest_only`：从订阅当下开始跟踪，只抓订阅之后发布的新视频，不回补历史
+
+### 为什么这样设计
+
+TikHub 文档目前能明确确认两件事：
+- 抖音主页作品接口支持 `max_cursor` 分页，第一页从 `0` 开始，后续使用上一次响应中的 `max_cursor` 继续翻页。
+- 作品列表接口支持 `sort_type`，其中 `0` 是**最新排序**，`1` 是**最热排序**。
+
+这足够我们自己实现“全量回补”与“从现在开始增量追踪”两种模式。
+
+但我没有在 TikHub 文档中找到“订阅后自动推送新增视频”“Webhook 回调”“创作者发新视频订阅通知”这类原生能力。因此，`latest_only` 不能依赖 TikHub 自动推送，只能由本地 registry 记录一个**订阅基线时间**，后续通过轮询主页作品接口并按发布时间过滤来实现。
+
+### 当前最终实现策略
+
+- 如果用户选择 `backfill_all`：
+  - 订阅注册后立即执行全量抓取
+  - 抓取完成后记录 `last_synced_at` 和 `latest_seen_create_time`
+- 如果用户选择 `latest_only`：
+  - 订阅注册时只写入 creator registry，不回补历史
+  - 记录 `subscription_started_at` 作为增量下界
+  - 后续同步时只抓发布时间 >= `subscription_started_at` 的作品
+
+### 本地注册表新增字段
+
+每个订阅对象建议额外保存：
+
+- `subscription_mode`: `backfill_all` | `latest_only`
+- `subscription_started_at`: 用户开始订阅的时间
+- `backfill_completed_at`: 仅全量回补成功后写入
+- `latest_seen_create_time`: 最近一次同步中见到的最新作品发布时间
+- `last_sync_cursor`: 可选，保留最近一次翻页状态
+- `last_synced_at`: 最近一次同步完成时间
+
+### 默认策略
+
+若用户没有明确说明，默认使用 `backfill_all`。因为这更稳，也更符合“先建完整知识库再分析”的需求。只有当用户明确说“不要补历史，只跟踪今后的新内容”时，才使用 `latest_only`。
+
 ## TikHub Key 放哪里
 
 不要把 Key 写进 `SKILL.md`、`README.md`、`references/*.md` 或脚本源码。

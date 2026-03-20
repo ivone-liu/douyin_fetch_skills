@@ -3,7 +3,7 @@ name: douyin-hot-video-script-generator
 description: Read existing Douyin creator knowledge bases and generate a practical short-video script tailored to the user's goal, audience, product, and tone. Use when the user asks to create a potentially high-performing video script based on previously extracted patterns, without blindly copying a creator.
 compatibility: Works best in environments with access to the local KB directory, writable output files, and optional code execution for filling a JSON or markdown script template.
 metadata:
-  author: Ivone(ivone@nibbly.cn)
+  author: OpenAI
   version: 1.0.0
   category: creative-generation
   upstream: douyin-shot-analysis-kb

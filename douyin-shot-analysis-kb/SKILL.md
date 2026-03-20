@@ -3,7 +3,7 @@ name: douyin-shot-analysis-kb
 description: Build, update, query, and maintain a reusable Douyin creative knowledge base from harvested creator videos and per-video analysis results. Use when the user asks to summarize filming techniques, extract repeatable patterns, maintain a creator playbook, compare content styles, or query existing Douyin knowledge for downstream generation.
 compatibility: Works best in environments with exported Douyin video metadata, optional playable video URLs or downloaded files, a writable local file system, and code execution for producing structured KB files.
 metadata:
-  author: Ivone(ivone@nibbly.cn)
+  author: OpenAI
   version: 1.1.0
   category: document-asset-creation
   upstream: tikhub-douyin

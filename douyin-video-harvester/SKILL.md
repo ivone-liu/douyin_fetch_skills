@@ -3,8 +3,8 @@ name: douyin-video-harvester
 description: Fetch all short videos from one or more Douyin accounts through TikHub with pagination, normalization, deduplication, and export. Use when the user asks to crawl every post from a Douyin creator, backfill an account, sync all videos from a monitored creator, or export a creator's full posting history.
 compatibility: Works best in environments with TikHub API access, outbound network access, secure secret storage for TIKHUB_API_TOKEN, and a writable local file system for JSON or CSV exports.
 metadata:
-  author: Ivone(ivone@nibbly.cn)
-  version: 1.0.0
+  author: OpenAI
+  version: 1.1.0
   category: workflow-automation
   upstream: tikhub-douyin
 ---
@@ -35,6 +35,8 @@ Optional crawl controls:
 - `count_per_page`, default 20
 - `max_items`, optional ceiling
 - `since_timestamp`, optional incremental sync lower bound
+- `subscription_mode`, optional, one of `backfill_all` or `latest_only`
+- `subscription_started_at`, required when `subscription_mode = latest_only`
 - `include_comments`, default false
 - `include_play_url`, default true
 - `output_format`, one of json or csv
@@ -70,6 +72,7 @@ Loop until one of these is true:
 - `has_more` is false
 - `max_items` limit is reached
 - the latest fetched item is older than `since_timestamp` during incremental sync
+- in `latest_only` mode, the fetched items are all older than `subscription_started_at`
 
 On each page:
 1. request one page
@@ -141,6 +144,15 @@ When previous exports exist:
 3. stop when you reach older already-known items repeatedly
 4. merge without duplicates
 5. keep a compact sync summary
+
+### Subscription-aware behavior
+
+If the creator was subscribed through the subscription manager:
+- `backfill_all`: perform a full crawl on first sync, then use normal incremental sync later
+- `latest_only`: set the lower bound to `subscription_started_at` on first sync and skip older history
+
+This mode should be implemented by client-side filtering plus TikHub pagination. Do not assume TikHub provides a native new-post subscription callback.
+
 
 ## Output format
 
