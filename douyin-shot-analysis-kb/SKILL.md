@@ -1,183 +1,158 @@
 ---
 name: douyin-shot-analysis-kb
-description: Analyze Douyin short videos for shooting methods, editing patterns, hooks, scene structure, and repeatable content techniques, then generate a structured knowledge base. Use when the user asks to study a creator's filming style, extract reusable creative tactics, summarize patterns across many Douyin videos, or build a reusable playbook from crawled video data.
-compatibility: Works best in environments with exported Douyin video metadata, optional access to playable video URLs or downloaded files, a writable local file system, and code execution for post-processing summaries.
+description: Build, update, query, and maintain a reusable Douyin creative knowledge base from harvested creator videos and per-video analysis results. Use when the user asks to summarize filming techniques, extract repeatable patterns, maintain a creator playbook, compare content styles, or query existing Douyin knowledge for downstream generation.
+compatibility: Works best in environments with exported Douyin video metadata, optional playable video URLs or downloaded files, a writable local file system, and code execution for producing structured KB files.
 metadata:
-  author: OpenAI
-  version: 1.0.0
+  author: Ivone(ivone@nibbly.cn)
+  version: 1.1.0
   category: document-asset-creation
   upstream: tikhub-douyin
 ---
 
 # Douyin Shot Analysis Knowledge Base
 
-This skill turns raw Douyin video datasets into reusable creative knowledge.
+This skill is responsible for turning harvested Douyin creator data into a persistent knowledge base that later skills can read.
+
+## Current responsibility boundary
+
+This skill should do four things:
+1. define KB scope
+2. build or update structured KB files
+3. preserve evidence and sample references
+4. answer questions from the KB or hand off to the script generator
+
+This skill should not be used to subscribe creators or fetch raw videos. Use the dedicated upstream skills first.
 
 ## When to use this skill
 
 Use this skill when the user wants to:
 - analyze a creator's filming approach
-- break down hooks, pacing, framing, and transitions
-- summarize repeatable content techniques across many posts
-- build an internal inspiration library or playbook
-- compare patterns across creators or content buckets
+- summarize hooks, pacing, framing, and transitions
+- build a persistent inspiration library
+- compare patterns across creators or categories
+- ask questions based on existing analyzed creators
 
-Do not use this skill to fetch creator videos. Use the harvester first.
+## Required inputs
 
-## Inputs
-
-Preferred inputs:
-- normalized video dataset from the harvester skill
-- playable video URLs or local video files for deeper inspection
+Preferred inputs in order:
+- normalized creator videos from the harvester skill
+- optional per-video manual or model-assisted analysis results
 - optional comments or engagement metrics
-- optional user lens such as 电商带货, 口播, 探店, 母婴, 知识分享, 或 vlog
+- optional user lens such as 电商带货, 口播, 探店, 母婴, 知识分享, vlog
 
-## Output goals
+## What counts as a real knowledge base
 
-Produce a knowledge base that is useful, not decorative. It should answer:
-- what this creator repeatedly does
-- how they open, pace, and close videos
-- which techniques appear often enough to be replicable
-- which patterns correlate with stronger engagement
-- what can be reused by another team without copying surface style blindly
+A real KB is not just one markdown summary.
+It must have:
+- creator identity
+- dataset scope
+- repeatable patterns
+- evidence video ids
+- optional metrics associations
+- update timestamp
+- reusable rules
+
+## Knowledge base file layout
+
+Preferred output layout:
+- `kb/creator-slug/knowledge-base.json`
+- `kb/creator-slug/knowledge-base.md`
+- `kb/creator-slug/patterns.json`
+- `kb/creator-slug/sample-index.json`
+
+Optional upstream analysis inputs:
+- `analysis/creator-slug/video-analysis.jsonl`
+- `normalized/creator-slug/videos.json`
 
 ## Core workflow
 
-### Step 1: Define the analysis scope
-Choose one of these modes:
+### Step 1: Define scope
+Choose one mode:
 - single creator deep dive
 - multi creator comparison
 - topic cluster analysis
 - top performing posts only
 - recent content trend scan
 
-State the scope explicitly before analyzing.
+State the scope explicitly.
 
-### Step 2: Build the analysis sample
+### Step 2: Build evidence set
 Start from normalized metadata.
-If full playback is available, inspect a representative sample rather than every video frame of every post.
-Recommended sampling order:
-1. top engagement posts
-2. recent posts
-3. median posts
-4. outliers that break the normal pattern
+If detailed video analysis exists, use it.
+If only metadata exists, build a low-confidence KB and mark the missing depth clearly.
 
-### Step 3: Analyze across these dimensions
-For each video or sampled subset, extract observations for:
+### Step 3: Normalize creator-level facts
+Capture:
+- creator profile
+- content niche
+- dominant formats
+- sample count
+- covered time range
+- data confidence
 
-#### Hook design
-- opening line pattern
-- first three-second visual action
-- whether the hook is conflict, surprise, utility, identity, or curiosity
+### Step 4: Build pattern groups
+Organize repeatable observations into:
+- hooks
+- shot language
+- editing rhythm
+- narrative templates
+- packaging
+- commercial intent
+- anti-patterns
 
-#### Shot language
-- camera distance, such as close-up, medium, wide
-- camera stability, such as tripod, handheld, moving follow
-- angle choice, such as eye-level, top-down, low-angle
-- subject framing and headroom
-- use of cut-ins or product detail shots
+Each pattern must contain:
+- `pattern_id`
+- `category`
+- `summary`
+- `evidence_video_ids`
+- `confidence`
+- `reusability_note`
+- `when_to_use`
+- `when_not_to_use`
 
-#### Editing rhythm
-- average shot duration
-- hard cuts versus masked transitions
-- caption density
-- pacing changes around payoff moments
-- looping or callback endings
+### Step 5: Save KB artifacts
+Write both:
+- machine-readable JSON
+- human-readable markdown
 
-#### Scene and narrative structure
-- common scene templates
-- whether there is a setup, conflict, payoff arc
-- whether the creator uses scripted beats or conversational drift
+Do not only save prose. The downstream script generation skill needs structured data.
 
-#### Audio layer
-- speech intensity and cadence
-- music role, such as emotional bed or trend support
-- use of sound effects for emphasis
+### Step 6: Support querying
+When the user asks questions such as:
+- 这个账号最常见的开头是什么
+- 哪些镜头最值得模仿
+- 哪类结构最容易复用
 
-#### Packaging
-- cover image style
-- title pattern
-- hashtag behavior
-- series behavior, recurring formats, or episodic structures
-
-#### Commercial or strategic intent
-- call to action type
-- trust-building device
-- proof element, such as demo, testimonial, before-after, or authority cue
-
-### Step 4: Turn observations into reusable rules
-Move from observation to principle.
-For every important pattern, write:
-- observed pattern
-- why it works here
-- when to reuse it
-- when not to reuse it
-- minimal implementation recipe
-
-Reject empty conclusions such as `节奏很好` or `镜头丰富`. Convert them into measurable statements.
-
-### Step 5: Build the knowledge base
-Organize the final KB into these sections:
-1. creator profile and content positioning
-2. recurring shot and edit patterns
-3. hook library
-4. structure templates
-5. high-performing motif map
-6. practical playbook
-7. anti-patterns and limits
-8. next experiments
-
-### Step 6: Connect patterns to metrics
-Whenever engagement data exists, correlate pattern frequency with:
-- play count
-- like rate
-- comment rate
-- collect rate
-- share rate
-
-Avoid claiming causality unless the evidence is strong. Frame it as a pattern association when needed.
+Read `knowledge-base.json` and `patterns.json` first. Do not regenerate the KB unless needed.
 
 ## Quality bar
 
-A good analysis should be:
+A good KB is:
 - specific
-- transferable
-- falsifiable
-- tied to evidence
-- useful to a content operator
+- evidence-backed
+- reusable
+- updateable
+- readable by both humans and downstream tools
 
-A bad analysis is vague trend poetry.
-
-## Deliverable formats
-
-Preferred outputs:
-- concise markdown knowledge base
-- structured JSON facts for downstream systems
-- creator playbook table for operators
-- cross-creator comparison memo
-
-## Recommended file layout
-
-- `kb/creator-slug/knowledge-base.md`
-- `kb/creator-slug/patterns.json`
-- `kb/creator-slug/sample-index.json`
+A bad KB is vague praise or abstract content poetry.
 
 ## Hand-off rules
 
-If the user has not yet crawled the creator's videos, stop and ask for the harvested dataset or invoke the harvester skill first.
-If the user wants a persistent inspiration library, recommend keeping one KB file per creator and one synthesis file per category.
+If there is no harvested data yet, stop and invoke the harvester skill first.
+If the user wants a script or idea based on the KB, hand off to `douyin-hot-video-script-generator`.
 
 ## References to consult when needed
 
 - `references/analysis-rubric.md`
 - `references/kb-template.md`
+- `references/knowledge-base-schema.md`
 - `scripts/build_kb.py`
+- `scripts/query_kb.py`
 
 ## Example triggers
 
 Use this skill when users say things like:
 - 分析这个抖音号的拍摄手法
-- 提炼这个博主的内容套路
-- 给我总结他的镜头语言和剪辑方式
 - 基于这些视频做一个知识库
-- 对比几个账号的拍摄技巧
+- 我已经抓完视频了，帮我沉淀成可复用的规则
+- 读取这个账号的知识库，告诉我最常见的拍摄套路

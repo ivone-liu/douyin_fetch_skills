@@ -3,7 +3,7 @@ name: douyin-video-harvester
 description: Fetch all short videos from one or more Douyin accounts through TikHub with pagination, normalization, deduplication, and export. Use when the user asks to crawl every post from a Douyin creator, backfill an account, sync all videos from a monitored creator, or export a creator's full posting history.
 compatibility: Works best in environments with TikHub API access, outbound network access, secure secret storage for TIKHUB_API_TOKEN, and a writable local file system for JSON or CSV exports.
 metadata:
-  author: OpenAI
+  author: Ivone(ivone@nibbly.cn)
   version: 1.0.0
   category: workflow-automation
   upstream: tikhub-douyin

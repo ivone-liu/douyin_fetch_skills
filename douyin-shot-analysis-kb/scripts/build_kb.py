@@ -1,94 +1,151 @@
 #!/usr/bin/env python3
-"""Build a first-pass markdown KB from normalized video metadata.
-
-This script does not watch videos. It creates a scaffold based on metadata so the
-analyst can fill in shot-language findings efficiently.
+"""Build a structured creator knowledge base from normalized videos and optional analysis rows.
 
 Usage:
-python scripts/build_kb.py videos.json knowledge-base.md
+python scripts/build_kb.py normalized_videos.json output_dir [video_analysis.jsonl]
 """
-
 from __future__ import annotations
 
 import json
-import statistics
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
 
-def load_items(path: Path) -> List[Dict[str, Any]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(payload, list):
-        return payload
-    return payload.get("items", [])
+def load_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def safe_mean(values: List[float]) -> float | None:
-    cleaned = [v for v in values if isinstance(v, (int, float))]
-    if not cleaned:
-        return None
-    return round(statistics.mean(cleaned), 2)
+def load_analysis_rows(path: Path | None) -> List[Dict[str, Any]]:
+    if not path or not path.exists():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        rows.append(json.loads(line))
+    return rows
 
 
-def build_markdown(items: List[Dict[str, Any]]) -> str:
-    author_name = next((x.get("author_name") for x in items if x.get("author_name")), "unknown-creator")
-    total = len(items)
-    durations = [x.get("duration_ms") for x in items if isinstance(x.get("duration_ms"), (int, float))]
-    likes = [x.get("digg_count") for x in items if isinstance(x.get("digg_count"), (int, float))]
-    shares = [x.get("share_count") for x in items if isinstance(x.get("share_count"), (int, float))]
-    music = Counter(x.get("music_title") for x in items if x.get("music_title"))
-    top_music = music.most_common(5)
+def timestamp_range(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    vals = [str(x.get("create_time")) for x in items if x.get("create_time") is not None]
+    if not vals:
+        return {"earliest": None, "latest": None}
+    return {"earliest": min(vals), "latest": max(vals)}
 
-    lines = []
-    lines.append(f"# {author_name} Douyin Knowledge Base")
-    lines.append("")
-    lines.append("## Dataset overview")
-    lines.append(f"- Total videos: {total}")
-    if safe_mean(durations) is not None:
-        lines.append(f"- Average duration_ms: {safe_mean(durations)}")
-    if safe_mean(likes) is not None:
-        lines.append(f"- Average digg_count: {safe_mean(likes)}")
-    if safe_mean(shares) is not None:
-        lines.append(f"- Average share_count: {safe_mean(shares)}")
-    lines.append("")
-    lines.append("## Top repeated music titles")
-    if top_music:
-        for title, freq in top_music:
-            lines.append(f"- {title}: {freq}")
+
+def make_creator(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    first = items[0] if items else {}
+    return {
+        "creator_key": first.get("author_sec_user_id") or first.get("author_unique_id") or "unknown-creator",
+        "display_name": first.get("author_name") or "unknown-creator",
+        "sec_user_id": first.get("author_sec_user_id"),
+        "unique_id": first.get("author_unique_id"),
+    }
+
+
+def patterns_from_analysis(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    buckets: Dict[tuple, List[str]] = defaultdict(list)
+    for row in rows:
+        vid = row.get("video_id")
+        for category in ["hook_type", "content_type", "narrative_structure"]:
+            value = row.get(category)
+            if value:
+                buckets[(category, str(value))].append(vid)
+        for category, source in [("shot_language", row.get("shot_style")), ("editing_rhythm", row.get("editing_style")), ("emotion_tone", row.get("emotion_tone"))]:
+            if isinstance(source, list):
+                for value in source:
+                    if value:
+                        buckets[(category, str(value))].append(vid)
+    patterns = []
+    for idx, ((category, summary), evidence) in enumerate(sorted(buckets.items(), key=lambda kv: len(kv[1]), reverse=True), start=1):
+        uniq = list(dict.fromkeys([x for x in evidence if x]))
+        confidence = round(min(0.95, 0.4 + 0.05 * len(uniq)), 2)
+        patterns.append({
+            "pattern_id": f"{category}_{idx:03d}",
+            "category": category,
+            "summary": summary,
+            "evidence_video_ids": uniq,
+            "confidence": confidence,
+            "reusability_note": "Derived from repeated analysis labels.",
+            "when_to_use": "Use when the target content goal matches the creator pattern.",
+            "when_not_to_use": "Do not copy blindly when audience, product, or tone is different.",
+        })
+    return patterns
+
+
+def heuristic_playbook(items: List[Dict[str, Any]], patterns: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    playbook = {"do_this": [], "test_this": [], "avoid_this": []}
+    if items:
+        playbook["do_this"].append("Keep a stable creator-specific format instead of changing style every post.")
+    top_hooks = [p for p in patterns if p.get("category") == "hook_type"][:3]
+    for p in top_hooks:
+        playbook["test_this"].append(f"Test hook pattern: {p.get('summary')}")
+    if not patterns:
+        playbook["avoid_this"].append("Do not make strong creative claims from metadata only.")
     else:
-        lines.append("- No music metadata found")
-    lines.append("")
-    lines.append("## Manual analysis sections")
-    lines.append("### Hooks")
-    lines.append("- Fill in repeated opening strategies after watching a representative sample")
-    lines.append("### Camera and framing")
-    lines.append("- Fill in repeated shot distances, angles, and movement")
-    lines.append("### Edit rhythm")
-    lines.append("- Fill in transition speed, subtitle density, and cut frequency")
-    lines.append("### Narrative structure")
-    lines.append("- Fill in common scene order and payoff design")
-    lines.append("### Packaging")
-    lines.append("- Fill in cover style, title patterns, and series behavior")
-    lines.append("### Reusable playbook")
-    lines.append("- Turn observations into do this, test this, avoid this rules")
-    lines.append("")
-    lines.append("## Evidence sample")
-    for item in items[:10]:
-        lines.append(f"- {item.get('video_id')} | {item.get('create_time')} | {item.get('desc', '')[:80]}")
-    lines.append("")
-    return "\n".join(lines)
+        playbook["avoid_this"].append("Do not reuse high-frequency patterns without checking fit for audience and product.")
+    return playbook
+
+
+def write_outputs(output_dir: Path, kb: Dict[str, Any]) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "knowledge-base.json").write_text(json.dumps(kb, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / "patterns.json").write_text(json.dumps(kb.get("patterns", []), ensure_ascii=False, indent=2), encoding="utf-8")
+    sample = {
+        "creator": kb.get("creator"),
+        "dataset": kb.get("dataset"),
+        "sample_video_ids": sorted({vid for p in kb.get("patterns", []) for vid in p.get("evidence_video_ids", [])})[:100],
+    }
+    (output_dir / "sample-index.json").write_text(json.dumps(sample, ensure_ascii=False, indent=2), encoding="utf-8")
+    md = []
+    md.append(f"# {kb['creator'].get('display_name', 'unknown')} Knowledge Base")
+    md.append("")
+    md.append("## Dataset")
+    md.append(f"- video_count: {kb['dataset'].get('video_count')}")
+    md.append(f"- analysis_count: {kb['dataset'].get('analysis_count')}")
+    md.append(f"- confidence: {kb['dataset'].get('confidence')}")
+    md.append("")
+    md.append("## Top patterns")
+    for p in kb.get("patterns", [])[:15]:
+        md.append(f"- [{p['category']}] {p['summary']} | evidence={len(p.get('evidence_video_ids', []))} | confidence={p.get('confidence')}")
+    md.append("")
+    md.append("## Playbook")
+    for section in ["do_this", "test_this", "avoid_this"]:
+        md.append(f"### {section}")
+        for item in kb.get("playbook", {}).get(section, []):
+            md.append(f"- {item}")
+    (output_dir / "knowledge-base.md").write_text("
+".join(md), encoding="utf-8")
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("Usage: build_kb.py videos.json knowledge-base.md", file=sys.stderr)
+    if len(sys.argv) not in (3, 4):
+        print("Usage: build_kb.py normalized_videos.json output_dir [video_analysis.jsonl]", file=sys.stderr)
         return 2
-    items = load_items(Path(sys.argv[1]))
-    md = build_markdown(items)
-    Path(sys.argv[2]).write_text(md, encoding="utf-8")
-    print(f"Wrote KB scaffold for {len(items)} videos")
+    videos = load_json(Path(sys.argv[1]))
+    if not isinstance(videos, list):
+        videos = videos.get("items") or []
+    analysis_rows = load_analysis_rows(Path(sys.argv[3]) if len(sys.argv) == 4 else None)
+    patterns = patterns_from_analysis(analysis_rows)
+    confidence = "high" if analysis_rows and len(analysis_rows) >= max(5, len(videos) // 5) else ("medium" if analysis_rows else "low")
+    kb = {
+        "creator": make_creator(videos),
+        "dataset": {
+            "video_count": len(videos),
+            "analysis_count": len(analysis_rows),
+            "time_range": timestamp_range(videos),
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "confidence": confidence,
+        },
+        "patterns": patterns,
+        "playbook": heuristic_playbook(videos, patterns),
+    }
+    write_outputs(Path(sys.argv[2]), kb)
+    print(f"Wrote structured KB to {sys.argv[2]}")
     return 0
 
 

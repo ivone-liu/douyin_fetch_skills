@@ -3,7 +3,7 @@ name: douyin-subscription-manager
 description: Manage Douyin account subscriptions through TikHub. Use when the user asks to subscribe to a Douyin creator, unsubscribe from one, check whether an account is already subscribed, sync a local subscription list with TikHub, or maintain a watchlist of creators for later crawling.
 compatibility: Works best in environments with TikHub API access, outbound network access, secure secret storage for TIKHUB_API_TOKEN, and a writable local file system for a subscription registry.
 metadata:
-  author: OpenAI
+  author: Ivone(ivone@nibbly.cn)
   version: 1.0.0
   category: workflow-automation
   upstream: tikhub-douyin
