@@ -1,58 +1,37 @@
 # OpenClaw Douyin Skills Pack
 
-这是一套面向 OpenClaw 的抖音工作流 skill 包，基于 TikHub 提供的数据能力设计。**当前已升级为 4 个 skill**：
+这是一套面向 OpenClaw 的抖音工作流 skill 包，基于 TikHub 的接口能力设计。当前包含 5 个 skill：
 
 1. `douyin-subscription-manager`
 2. `douyin-video-harvester`
 3. `douyin-shot-analysis-kb`
 4. `douyin-hot-video-script-generator`
+5. `douyin-single-video-fetcher`
 
-这 4 个 skill 现在形成一条完整链路：
+## 这次版本的重点升级
 
-- **订阅管理**：维护长期跟踪的抖音账号名单
-- **视频抓取**：把指定账号的全部短视频尽量完整抓下来
-- **知识库构建与查询**：将视频数据与分析结果沉淀为结构化知识库，并可复用、可查询
-- **脚本生成**：根据用户真实目标，读取知识库并生成一条更接近“热门视频”的脚本草案
+这次不是再加一层空描述，而是把 **单视频 skill 升级成一条可落地的数据流水线入口**。
 
-## 这次升级后最大的变化
+现在单视频流程的目标是：
 
-原来的 `douyin-shot-analysis-kb` 只有“分析说明书 + 脚手架脚本”，只能产出一个 markdown 初稿，**不能算完整知识库**。
+1. 调 TikHub 拿到单条作品接口返回
+2. **原始返回完整保存到本地 JSON**
+3. 从返回里抽取有效字段，把 **视频 URL / 音乐 URL / 本地路径 / 分析状态** 写入 MySQL
+4. 下载视频和音乐到本地，并按目录分组
+5. 下载完成后立刻产出一份 **每视频单独的 MD 分析文档**
+6. 后续做知识库或脚本生成时，**优先读本地 MD，而不是重复读原始 JSON**
 
-现在它已经升级为：
-
-- 能定义知识库存储结构
-- 能把分析结果沉淀到 `kb/` 目录
-- 能区分原始数据、逐条分析、模式规则、可读总结
-- 能被后续脚本生成 skill 读取和复用
-
-换句话说，原来是“分析文档模板”，现在才更接近“可持续更新的知识资产”。
+换句话说，原始 JSON 是证据底稿，MySQL 是索引与调度层，MD 是分析层的主入口。
 
 ---
 
-## 当前状态
-
-这套 skill **已经适合作为可加载的 skill 规范包使用**，但它仍不是“零配置即可直接联网抓抖音并自动产出爆款脚本”的成品插件。
-
-它现在包含的是：
-
-- skill 的职责定义
-- 调用时机说明
-- 输入输出约定
-- 工作流拆分
-- 本地知识库存储规范
-- 部分可执行脚本样例
-
-它**还不包含**一套完全焊死的 TikHub 执行器和视频视觉理解流水线。也就是说：
-
-- Skill 负责告诉模型“什么时候用哪把刀”
-- 真实请求 TikHub 的逻辑，需要由你的 OpenClaw 运行环境或后续脚本执行
-- 视频镜头分析的深水区，仍需要你接入可播放视频、OCR、ASR、视频理解模型或人工校验
-
-## 目录结构
+## 推荐目录结构
 
 ```text
 openclaw-douyin-skills/
   README.md
+  db/
+    douyin_media_schema.sql
   douyin-subscription-manager/
     SKILL.md
   douyin-video-harvester/
@@ -63,125 +42,187 @@ openclaw-douyin-skills/
     scripts/
   douyin-hot-video-script-generator/
     SKILL.md
+    scripts/
+  douyin-single-video-fetcher/
+    SKILL.md
     references/
     scripts/
 ```
 
-## 推荐使用顺序
-
-1. 用 `douyin-subscription-manager` 维护你要长期跟踪的账号
-2. 用 `douyin-video-harvester` 把目标账号的历史视频抓全
-3. 用 `douyin-shot-analysis-kb` 沉淀为知识库
-4. 用 `douyin-hot-video-script-generator` 结合知识库与用户目标生成脚本
-
-这 4 步里，**第 3 步是关键分水岭**。如果第 3 步只是写一篇泛泛的总结，你后面的脚本生成就会变成空转。只有当知识库是结构化、可追溯、可更新的，第 4 步才有意义。
-
-## 订阅后的抓取模式
-
-这次又补了一层关键策略：**订阅**和**抓取策略**分开，但在注册表里强绑定。
-
-用户在订阅账号后，可以选择两种模式：
-
-- `backfill_all`：首次订阅后，回补该账号全部历史视频，再进入后续增量同步
-- `latest_only`：从订阅当下开始跟踪，只抓订阅之后发布的新视频，不回补历史
-
-### 为什么这样设计
-
-TikHub 文档目前能明确确认两件事：
-- 抖音主页作品接口支持 `max_cursor` 分页，第一页从 `0` 开始，后续使用上一次响应中的 `max_cursor` 继续翻页。
-- 作品列表接口支持 `sort_type`，其中 `0` 是**最新排序**，`1` 是**最热排序**。
-
-这足够我们自己实现“全量回补”与“从现在开始增量追踪”两种模式。
-
-但我没有在 TikHub 文档中找到“订阅后自动推送新增视频”“Webhook 回调”“创作者发新视频订阅通知”这类原生能力。因此，`latest_only` 不能依赖 TikHub 自动推送，只能由本地 registry 记录一个**订阅基线时间**，后续通过轮询主页作品接口并按发布时间过滤来实现。
-
-### 当前最终实现策略
-
-- 如果用户选择 `backfill_all`：
-  - 订阅注册后立即执行全量抓取
-  - 抓取完成后记录 `last_synced_at` 和 `latest_seen_create_time`
-- 如果用户选择 `latest_only`：
-  - 订阅注册时只写入 creator registry，不回补历史
-  - 记录 `subscription_started_at` 作为增量下界
-  - 后续同步时只抓发布时间 >= `subscription_started_at` 的作品
-
-### 本地注册表新增字段
-
-每个订阅对象建议额外保存：
-
-- `subscription_mode`: `backfill_all` | `latest_only`
-- `subscription_started_at`: 用户开始订阅的时间
-- `backfill_completed_at`: 仅全量回补成功后写入
-- `latest_seen_create_time`: 最近一次同步中见到的最新作品发布时间
-- `last_sync_cursor`: 可选，保留最近一次翻页状态
-- `last_synced_at`: 最近一次同步完成时间
-
-### 默认策略
-
-若用户没有明确说明，默认使用 `backfill_all`。因为这更稳，也更符合“先建完整知识库再分析”的需求。只有当用户明确说“不要补历史，只跟踪今后的新内容”时，才使用 `latest_only`。
-
-## TikHub Key 放哪里
-
-不要把 Key 写进 `SKILL.md`、`README.md`、`references/*.md` 或脚本源码。
-
-统一使用环境变量：
-
-```bash
-export TIKHUB_API_TOKEN="你的_tikhub_token"
-```
-
-或写到 `.env`：
-
-```env
-TIKHUB_API_TOKEN=你的_tikhub_token
-```
-
-推荐额外支持：
-
-```env
-TIKHUB_BASE_URL=https://api.tikhub.io
-```
-
-## 知识库现在如何管理
-
-推荐目录：
+运行时建议在你的项目侧准备一个数据根目录，例如：
 
 ```text
-data/
-  raw/
-    creator-slug/
+storage/
+  raw_api/
+    douyin_single_video/
+      2026-03-22/
+        1234567890.json
   normalized/
+    douyin_single_video/
+      1234567890.json
+  downloads/
+    videos/
+      creator-slug/
+        1234567890.mp4
+    music/
+      creator-slug/
+        music_987654321.mp3
+  analysis_md/
     creator-slug/
-  analysis/
-    creator-slug/
-      video-analysis.jsonl
-  kb/
-    creator-slug/
-      knowledge-base.json
-      knowledge-base.md
-      patterns.json
-      sample-index.json
+      1234567890.md
 ```
 
-### 各层含义
+---
 
-- `raw/`：TikHub 原始返回
-- `normalized/`：抓取后清洗统一的视频字段
-- `analysis/`：逐条视频分析结果
-- `kb/`：模式归纳、总结、可读知识库
+## 数据职责怎么分
 
-## 现在知识库到底具备什么能力
+### 1. 原始 JSON
+保存 TikHub 接口完整返回。
 
-### 具备的
-- 规范知识库目录结构
-- 输出结构化 JSON 知识库
-- 输出 Markdown 总结
-- 记录样本来源和证据视频 id
-- 允许后续 skill 查询和复用
+用途：
+- 审计
+- 回放
+- 字段补提取
+- 排查解析 bug
 
-### 还不具备的
-- 自动观看全部视频并精准识别镜头语言
-- 自动完成高质量 OCR / ASR / 视频理解
-- 自动保证“热门脚本”一定爆
+### 2. MySQL
+不存整坨原始 JSON，重点存：
+- 视频主键与创作者标识
+- 视频 URL / 音乐 URL
+- 本地文件路径
+- 下载状态
+- 分析状态
+- 本地 MD 路径
 
-最后这一条尤其要清醒。知识库能提高命中率，但不能替你越过内容质量、选题、时机、账号权重这些现实变量。
+用途：
+- 快速查询
+- 去重
+- 调度下载
+- 标记分析是否完成
+
+### 3. 本地 MD
+每条视频一份分析文档。
+
+用途：
+- 人可读
+- 模型可读
+- 作为后续知识库和脚本生成的主输入
+
+这一步是关键。以后再分析，不应该每次都从原始 JSON 重新拼接语义，而应该直接读取这份 MD。
+
+---
+
+## 单视频流水线怎么跑
+
+### 输入
+你需要至少提供其中一个：
+- `aweme_id`
+- 抖音单条作品链接
+- 含链接的分享文本
+- 单条作品 URL
+
+### 输出
+单视频 skill 现在应该产出这些东西：
+
+1. `raw_api/douyin_single_video/<date>/<video_id>.json`
+2. `normalized/douyin_single_video/<video_id>.json`
+3. MySQL 中的：
+   - `creators`
+   - `videos`
+   - `music_assets`
+   - `video_music_map`
+   - `api_fetch_logs`
+4. `downloads/videos/<creator>/<video_id>.<ext>`
+5. `downloads/music/<creator>/<music_key>.<ext>`
+6. `analysis_md/<creator>/<video_id>.md`
+
+### 核心顺序
+
+1. fetch one video
+2. save raw JSON
+3. normalize fields
+4. upsert MySQL rows
+5. download video and music
+6. update local paths and statuses
+7. generate per-video markdown analysis
+8. future downstream reading uses local MD first
+
+---
+
+## 环境变量建议
+
+至少准备这些：
+
+```bash
+TIKHUB_API_TOKEN=your_tikhub_token
+MYSQL_DSN=mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4
+DOUYIN_STORAGE_ROOT=/absolute/path/to/storage
+```
+
+说明：
+- `MYSQL_DSN` 给单视频 pipeline 用
+- `DOUYIN_STORAGE_ROOT` 用来统一存 raw json / downloads / md
+
+---
+
+## SQL 结构
+
+SQL 已经放在：
+
+```text
+db/douyin_media_schema.sql
+```
+
+数据库结构的设计原则：
+- 原始 JSON 在本地文件，不强塞数据库
+- 数据库只存高价值索引字段和状态字段
+- 一个视频对应一条 `videos`
+- 音乐作为独立 `music_assets`
+- 中间关系放在 `video_music_map`
+- 接口调用留痕放 `api_fetch_logs`
+
+---
+
+## 技能之间现在的推荐关系
+
+### A. 单视频链路
+- `douyin-single-video-fetcher`
+- `douyin-shot-analysis-kb`（读取本地 MD 做聚合）
+- `douyin-hot-video-script-generator`（读取 MD / KB 生成脚本）
+
+### B. 账号级链路
+- `douyin-subscription-manager`
+- `douyin-video-harvester`
+- `douyin-shot-analysis-kb`
+- `douyin-hot-video-script-generator`
+
+---
+
+## 重要边界
+
+### 现在已经做对的部分
+- 原始响应本地留痕
+- 有效 URL 入库
+- 下载和分析状态可追踪
+- 每视频一份 MD
+- 下游优先读 MD
+
+### 仍然需要你自己的环境补完的部分
+- 真正请求 TikHub 的运行器
+- MySQL 连接信息
+- 视频下载权限与网络环境
+- 更强的视频视觉理解模型
+
+别搞错：这个 skill 包已经把数据结构和工作流焊得更实了，但它不是替你托管执行环境。
+
+---
+
+## 最推荐的实际使用方式
+
+### 先测一条视频
+1. 用 `douyin-single-video-fetcher` 跑通一条作品
+2. 确认生成了 raw json / normalized json / downloads / md
+3. 确认 MySQL 的 `videos` 和 `music_assets` 有记录
+4. 再开始做多视频聚合和知识库
+
+先跑通一条，比一上来整号全量抓取更靠谱。

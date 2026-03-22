@@ -11,7 +11,7 @@ metadata:
 
 # Douyin Shot Analysis Knowledge Base
 
-This skill is responsible for turning harvested Douyin creator data into a persistent knowledge base that later skills can read.
+This skill is responsible for turning harvested Douyin creator data and local per-video markdown analyses into a persistent knowledge base that later skills can read.
 
 ## Current responsibility boundary
 
@@ -35,6 +35,7 @@ Use this skill when the user wants to:
 ## Required inputs
 
 Preferred inputs in order:
+- local per-video markdown analyses under `analysis_md/`
 - normalized creator videos from the harvester skill
 - optional per-video manual or model-assisted analysis results
 - optional comments or engagement metrics
@@ -77,7 +78,7 @@ Choose one mode:
 State the scope explicitly.
 
 ### Step 2: Build evidence set
-Start from normalized metadata.
+Start from local markdown analyses when available. Use normalized metadata only as a secondary source.
 If detailed video analysis exists, use it.
 If only metadata exists, build a low-confidence KB and mark the missing depth clearly.
 
@@ -156,3 +157,12 @@ Use this skill when users say things like:
 - 基于这些视频做一个知识库
 - 我已经抓完视频了，帮我沉淀成可复用的规则
 - 读取这个账号的知识库，告诉我最常见的拍摄套路
+
+## Source priority
+
+For downstream reasoning, prefer this order:
+1. per-video local markdown analysis
+2. normalized json
+3. raw API json
+
+This ordering prevents repeated re-interpretation of raw payloads.

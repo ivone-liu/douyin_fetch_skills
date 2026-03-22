@@ -26,6 +26,7 @@ Do not use this skill until a usable KB exists.
 ## Required inputs
 
 Prefer these inputs:
+- local per-video markdown analyses under `analysis_md/`
 - `knowledge-base.json` or `patterns.json`
 - user goal
 - target audience
@@ -36,15 +37,16 @@ Prefer these inputs:
 
 ## Core workflow
 
-### Step 1: Read the KB before generating
+### Step 1: Read local markdown and KB before generating
 Inspect:
 - repeated hooks
 - repeated structures
 - reusable shot-language patterns
 - anti-patterns
 - playbook notes
+- per-video local markdown notes
 
-Do not generate from memory when the KB is available.
+Do not generate from memory when markdown or KB files are available.
 
 ### Step 2: Translate user need into generation constraints
 Capture:
