@@ -149,6 +149,99 @@ storage/
 
 ---
 
+## 依赖是否已经写清楚？
+
+之前写得不够完整。现在这版已经把**必要依赖、推荐依赖、安装脚本、一键初始化方式**补齐了。
+
+### 必要依赖
+这些不装，单视频入库流水线就跑不起来：
+
+- Python 3.10+
+- MySQL 8.0+ 或兼容版本
+- `pymysql`
+- `requests`
+- `ffmpeg`
+- `ffprobe`
+
+作用分别是：
+- `pymysql`：把有效字段写入 MySQL
+- `requests`：请求和下载资源
+- `ffmpeg` / `ffprobe`：提取媒体信息、生成基础分析素材
+
+### 推荐依赖
+这些不是硬性要求，但装上后更顺手：
+
+- `python-dotenv`
+- `opencv-python`
+- `librosa`
+
+说明：
+- `opencv-python`：后续做镜头切换、画面变化频率分析
+- `librosa`：后续做音乐节奏、BPM、踩点分析
+
+### 一键安装脚本
+根目录新增了：
+
+```text
+install.sh
+requirements.txt
+```
+
+安装方式：
+
+```bash
+bash ./install.sh
+```
+
+这个脚本会做几件事：
+
+1. 创建 `.venv`
+2. 安装 `requirements.txt`
+3. 检查并尽量安装 `ffmpeg` / `ffprobe`
+4. 输出数据库初始化命令和单视频测试命令
+
+如果你不想自动安装 ffmpeg，可以这样：
+
+```bash
+SKIP_FFMPEG=1 bash ./install.sh
+```
+
+如果你已经有自己的虚拟环境：
+
+```bash
+SKIP_VENV=1 bash ./install.sh
+```
+
+### 数据库初始化
+SQL 文件仍然在：
+
+```text
+db/douyin_media_schema.sql
+```
+
+初始化示例：
+
+```bash
+mysql -h 127.0.0.1 -u <user> -p <database> < ./db/douyin_media_schema.sql
+```
+
+### 最小安装后检查
+装完后至少确认这几件事：
+
+```bash
+python --version
+ffmpeg -version
+ffprobe -version
+```
+
+并确认这些环境变量已设置：
+
+```bash
+export TIKHUB_API_TOKEN='your_tikhub_token'
+export MYSQL_DSN='mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4'
+export DOUYIN_STORAGE_ROOT='/absolute/path/to/storage'
+```
+
 ## 环境变量建议
 
 至少准备这些：
