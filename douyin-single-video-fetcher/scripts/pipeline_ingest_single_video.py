@@ -3,19 +3,20 @@
 
 What it does:
 1. read a raw TikHub single-video payload
-2. save raw payload to local JSON
+2. save raw payload to a skill-pack-local creator directory
 3. normalize key fields
 4. upsert searchable fields into MySQL
-5. download video and music into grouped local directories
+5. download video and music into creator-grouped local directories
 6. generate one markdown analysis file per video
 7. update MySQL with local paths and statuses
 
+Default storage behavior:
+- no external storage root is required
+- data is written inside this skill pack under ../data/creators/<creator-slug>/...
+- this makes the storage contract deterministic across installs
+
 Example:
-python scripts/pipeline_ingest_single_video.py raw_payload.json \
-  --storage-root ./storage \
-  --mysql-dsn 'mysql://user:pass@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4' \
-  --endpoint-name fetch_one_video_v2 \
-  --source-input 'https://v.douyin.com/xxxx/'
+python scripts/pipeline_ingest_single_video.py raw_payload.json   --mysql-dsn 'mysql://user:pass@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4'   --endpoint-name fetch_one_video_v2   --source-input 'https://v.douyin.com/xxxx/'
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 try:
@@ -40,10 +41,15 @@ except Exception:
 
 from fetch_single_video import normalize_single_video
 
+SKILL_DIR = Path(__file__).resolve().parents[1]
+PACK_ROOT = SKILL_DIR.parent
+DATA_ROOT = PACK_ROOT / 'data'
+CREATORS_ROOT = DATA_ROOT / 'creators'
+
 
 @dataclass
 class PipelineContext:
-    storage_root: Path
+    creators_root: Path
     mysql_dsn: Optional[str]
     endpoint_name: str
     source_input: str
@@ -51,7 +57,7 @@ class PipelineContext:
 
 def slugify(value: str) -> str:
     value = (value or 'unknown').strip().lower()
-    value = re.sub(r'[^a-z0-9\u4e00-\u9fff_-]+', '-', value)
+    value = re.sub(r'[^a-z0-9一-鿿_-]+', '-', value)
     value = re.sub(r'-+', '-', value).strip('-')
     return value or 'unknown'
 
@@ -117,16 +123,28 @@ def choose_extension(url: Optional[str], content_type: Optional[str], fallback: 
     return fallback
 
 
-def save_raw_payload(payload: Dict[str, Any], ctx: PipelineContext, video_id: str) -> Path:
-    out = ctx.storage_root / 'raw_api' / 'douyin_single_video' / today_dir()
+def get_creator_slug(normalized: Dict[str, Any]) -> str:
+    return slugify(normalized.get('author_unique_id') or normalized.get('author_name') or 'unknown-creator')
+
+
+def creator_root(ctx: PipelineContext, normalized: Dict[str, Any]) -> Path:
+    root = ctx.creators_root / get_creator_slug(normalized)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def save_raw_payload(payload: Dict[str, Any], ctx: PipelineContext, normalized: Dict[str, Any]) -> Path:
+    video_id = normalized.get('video_id') or 'unknown-video'
+    out = creator_root(ctx, normalized) / 'raw_api' / 'douyin_single_video' / today_dir()
     out.mkdir(parents=True, exist_ok=True)
     path = out / f'{video_id}.json'
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
     return path
 
 
-def save_normalized(normalized: Dict[str, Any], ctx: PipelineContext, video_id: str) -> Path:
-    out = ctx.storage_root / 'normalized' / 'douyin_single_video'
+def save_normalized(normalized: Dict[str, Any], ctx: PipelineContext) -> Path:
+    video_id = normalized.get('video_id') or 'unknown-video'
+    out = creator_root(ctx, normalized) / 'normalized' / 'douyin_single_video'
     out.mkdir(parents=True, exist_ok=True)
     path = out / f'{video_id}.json'
     path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -205,9 +223,9 @@ def infer_media_notes(video_probe: Dict[str, Any], music_probe: Dict[str, Any]) 
 
 def write_analysis_md(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: Dict[str, Any], raw_json_path: Path,
                       normalized_path: Path, video_path: Optional[Path], music_path: Optional[Path]) -> Path:
-    creator_slug = slugify(normalized.get('author_unique_id') or normalized.get('author_name') or 'unknown-creator')
+    creator_dir = creator_root(ctx, normalized)
     video_id = normalized.get('video_id') or 'unknown-video'
-    out_dir = ctx.storage_root / 'analysis_md' / creator_slug
+    out_dir = creator_dir / 'analysis_md'
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f'{video_id}.md'
 
@@ -258,226 +276,185 @@ def write_analysis_md(ctx: PipelineContext, normalized: Dict[str, Any], music_me
     lines.extend([
         '',
         '## Production notes',
-        '- Use this markdown as the primary downstream analysis source.',
-        '- If a stronger video model or manual review is available, append findings here instead of rewriting from raw JSON.',
+        '- This markdown file is the preferred downstream analysis source.',
+        '- Read this file first when building KB entries or generating scripts.',
+        '- If deeper visual or audio analysis is needed, extend this file rather than re-reading raw API payloads each time.',
         '',
         '## Uncertainty',
-        '- camera motion, shot transitions, and framing cannot be claimed with high confidence unless frame-level analysis is added.',
+        '- Shot language and editing rhythm remain low-confidence until frame-level analysis or manual review is added.',
+        '- TikHub metadata alone cannot prove camera motion or cut timing.',
     ])
     md_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return md_path
 
 
 def parse_mysql_dsn(dsn: str) -> Dict[str, Any]:
+    from urllib.parse import urlparse, parse_qs
     parsed = urlparse(dsn)
-    if parsed.scheme not in {'mysql', 'mysql+pymysql'}:
-        raise ValueError('MYSQL_DSN must start with mysql:// or mysql+pymysql://')
-    query = parse_qs(parsed.query)
+    if parsed.scheme not in {'mysql'}:
+        raise ValueError('MYSQL_DSN must start with mysql://')
+    qs = parse_qs(parsed.query)
     return {
         'host': parsed.hostname or '127.0.0.1',
         'port': parsed.port or 3306,
         'user': parsed.username,
         'password': parsed.password,
         'database': (parsed.path or '/').lstrip('/'),
-        'charset': query.get('charset', ['utf8mb4'])[0],
+        'charset': qs.get('charset', ['utf8mb4'])[0],
         'autocommit': True,
     }
 
 
-def get_conn(dsn: Optional[str]):
-    if not dsn:
+def with_mysql(ctx: PipelineContext):
+    if not ctx.mysql_dsn:
         return None
     if pymysql is None:
-        raise RuntimeError('pymysql is required for MYSQL_DSN support. Install with: pip install pymysql')
-    return pymysql.connect(**parse_mysql_dsn(dsn))
+        raise RuntimeError('pymysql is required when MYSQL_DSN is provided')
+    return pymysql.connect(**parse_mysql_dsn(ctx.mysql_dsn))
 
 
-def upsert_creator(cur, normalized: Dict[str, Any]) -> Optional[int]:
-    sec_user_id = normalized.get('author_sec_user_id')
-    unique_id = normalized.get('author_unique_id')
-    display_name = normalized.get('author_name')
-    cur.execute(
-        """
-        INSERT INTO creators (sec_user_id, unique_id, display_name)
-        VALUES (%s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-          unique_id = VALUES(unique_id),
-          display_name = VALUES(display_name),
-          updated_at = CURRENT_TIMESTAMP
-        """,
-        (sec_user_id, unique_id, display_name),
-    )
-    cur.execute('SELECT id FROM creators WHERE sec_user_id = %s OR unique_id = %s LIMIT 1', (sec_user_id, unique_id))
-    row = cur.fetchone()
-    return row[0] if row else None
-
-
-def upsert_video(cur, creator_id: Optional[int], normalized: Dict[str, Any], raw_json_path: Path, normalized_path: Path,
-                 source_input: str) -> int:
-    cur.execute(
-        """
-        INSERT INTO videos (
-          aweme_id, creator_id, desc_text, duration_ms, digg_count, comment_count, collect_count,
-          share_count, play_count, cover_url, play_url, source_input, raw_json_path, normalized_json_path
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-          creator_id = VALUES(creator_id),
-          desc_text = VALUES(desc_text),
-          duration_ms = VALUES(duration_ms),
-          digg_count = VALUES(digg_count),
-          comment_count = VALUES(comment_count),
-          collect_count = VALUES(collect_count),
-          share_count = VALUES(share_count),
-          play_count = VALUES(play_count),
-          cover_url = VALUES(cover_url),
-          play_url = VALUES(play_url),
-          source_input = VALUES(source_input),
-          raw_json_path = VALUES(raw_json_path),
-          normalized_json_path = VALUES(normalized_json_path),
-          updated_at = CURRENT_TIMESTAMP
-        """,
-        (
-            normalized.get('video_id'), creator_id, normalized.get('desc'), normalized.get('duration_ms'),
-            normalized.get('digg_count'), normalized.get('comment_count'), normalized.get('collect_count'),
-            normalized.get('share_count'), normalized.get('play_count'), normalized.get('cover_url'),
-            normalized.get('play_url'), source_input, str(raw_json_path), str(normalized_path)
-        ),
-    )
-    cur.execute('SELECT id FROM videos WHERE aweme_id = %s', (normalized.get('video_id'),))
-    return cur.fetchone()[0]
-
-
-def upsert_music(cur, music_meta: Dict[str, Any]) -> Optional[int]:
-    if not any([music_meta.get('music_id'), music_meta.get('play_url'), music_meta.get('title')]):
-        return None
-    key = music_meta.get('music_id') or f"url:{music_meta.get('play_url')}"
-    cur.execute(
-        """
-        INSERT INTO music_assets (music_id, title, author_name, play_url, duration_ms)
-        VALUES (%s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-          title = VALUES(title),
-          author_name = VALUES(author_name),
-          play_url = VALUES(play_url),
-          duration_ms = VALUES(duration_ms),
-          updated_at = CURRENT_TIMESTAMP
-        """,
-        (key, music_meta.get('title'), music_meta.get('author_name'), music_meta.get('play_url'), music_meta.get('duration_ms')),
-    )
-    cur.execute('SELECT id FROM music_assets WHERE music_id = %s', (key,))
-    row = cur.fetchone()
-    return row[0] if row else None
-
-
-def link_video_music(cur, video_row_id: int, music_row_id: Optional[int]) -> None:
-    if not music_row_id:
+def upsert_mysql(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: Dict[str, Any], raw_json_path: Path,
+                 normalized_path: Path, video_path: Optional[Path], music_path: Optional[Path], md_path: Path) -> None:
+    conn = with_mysql(ctx)
+    if conn is None:
         return
-    cur.execute('INSERT IGNORE INTO video_music_map (video_id, music_id) VALUES (%s, %s)', (video_row_id, music_row_id))
+    creator_slug = get_creator_slug(normalized)
+    video_id = str(normalized.get('video_id') or '')
+    music_id = str(music_meta.get('music_id') or '') if music_meta.get('music_id') else None
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO creators (creator_slug, unique_id, sec_user_id, display_name, last_seen_at)
+            VALUES (%s, %s, %s, %s, NOW())
+            ON DUPLICATE KEY UPDATE
+              unique_id = VALUES(unique_id),
+              sec_user_id = VALUES(sec_user_id),
+              display_name = VALUES(display_name),
+              last_seen_at = NOW()
+            """,
+            (creator_slug, normalized.get('author_unique_id'), normalized.get('author_sec_user_id'), normalized.get('author_name')),
+        )
+        cur.execute(
+            """
+            INSERT INTO videos (
+              aweme_id, creator_slug, desc_text, create_time_raw, duration_ms,
+              play_url, cover_url, raw_json_path, normalized_json_path,
+              local_video_path, markdown_analysis_path, download_status, analysis_status,
+              digg_count, comment_count, share_count, collect_count, play_count, last_ingested_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON DUPLICATE KEY UPDATE
+              desc_text = VALUES(desc_text),
+              create_time_raw = VALUES(create_time_raw),
+              duration_ms = VALUES(duration_ms),
+              play_url = VALUES(play_url),
+              cover_url = VALUES(cover_url),
+              raw_json_path = VALUES(raw_json_path),
+              normalized_json_path = VALUES(normalized_json_path),
+              local_video_path = VALUES(local_video_path),
+              markdown_analysis_path = VALUES(markdown_analysis_path),
+              download_status = VALUES(download_status),
+              analysis_status = VALUES(analysis_status),
+              digg_count = VALUES(digg_count),
+              comment_count = VALUES(comment_count),
+              share_count = VALUES(share_count),
+              collect_count = VALUES(collect_count),
+              play_count = VALUES(play_count),
+              last_ingested_at = NOW()
+            """,
+            (
+                video_id, creator_slug, normalized.get('desc'), str(normalized.get('create_time') or ''), normalized.get('duration_ms'),
+                normalized.get('play_url'), normalized.get('cover_url'), str(raw_json_path), str(normalized_path),
+                str(video_path) if video_path else None, str(md_path),
+                'downloaded' if video_path else 'missing_video', 'completed',
+                normalized.get('digg_count'), normalized.get('comment_count'), normalized.get('share_count'),
+                normalized.get('collect_count'), normalized.get('play_count'),
+            ),
+        )
+        if music_id or music_meta.get('play_url'):
+            cur.execute(
+                """
+                INSERT INTO music_assets (music_id, title, author_name, duration_ms, play_url, local_music_path, download_status, last_seen_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                  title = VALUES(title),
+                  author_name = VALUES(author_name),
+                  duration_ms = VALUES(duration_ms),
+                  play_url = VALUES(play_url),
+                  local_music_path = VALUES(local_music_path),
+                  download_status = VALUES(download_status),
+                  last_seen_at = NOW()
+                """,
+                (
+                    music_id or f'music-url::{music_meta.get("play_url")}', music_meta.get('title'), music_meta.get('author_name'),
+                    music_meta.get('duration_ms'), music_meta.get('play_url'), str(music_path) if music_path else None,
+                    'downloaded' if music_path else 'missing_music_url',
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO video_music_map (aweme_id, music_id)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE music_id = VALUES(music_id)
+                """,
+                (video_id, music_id or f'music-url::{music_meta.get("play_url")}'),
+            )
+        cur.execute(
+            """
+            INSERT INTO api_fetch_logs (aweme_id, endpoint_name, source_input, raw_json_path, fetched_at)
+            VALUES (%s, %s, %s, %s, NOW())
+            """,
+            (video_id, ctx.endpoint_name, ctx.source_input, str(raw_json_path)),
+        )
+    conn.close()
 
 
-def insert_fetch_log(cur, source_type: str, source_input: str, endpoint_name: str, raw_json_path: Path, aweme_id: Optional[str]):
-    cur.execute(
-        """
-        INSERT INTO api_fetch_logs (source_type, source_input, endpoint_name, request_params_json, response_code, raw_json_path, aweme_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-        (source_type, source_input, endpoint_name, json.dumps({'source_input': source_input}, ensure_ascii=False), 200, str(raw_json_path), aweme_id),
-    )
-
-
-def update_download_paths(cur, aweme_id: str, video_path: Optional[Path], md_path: Optional[Path]):
-    cur.execute(
-        """
-        UPDATE videos
-        SET local_video_path = %s,
-            local_analysis_md_path = %s,
-            download_status = %s,
-            downloaded_at = CASE WHEN %s IS NOT NULL THEN CURRENT_TIMESTAMP ELSE downloaded_at END,
-            analysis_status = %s,
-            analyzed_at = CASE WHEN %s IS NOT NULL THEN CURRENT_TIMESTAMP ELSE analyzed_at END,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE aweme_id = %s
-        """,
-        (str(video_path) if video_path else None, str(md_path) if md_path else None,
-         'downloaded' if video_path else 'missing', str(video_path) if video_path else None,
-         'completed' if md_path else 'pending', str(md_path) if md_path else None, aweme_id)
-    )
-
-
-def update_music_download(cur, music_meta: Dict[str, Any], music_path: Optional[Path]) -> None:
-    if not music_meta.get('music_id') and not music_meta.get('play_url'):
-        return
-    key = music_meta.get('music_id') or f"url:{music_meta.get('play_url')}"
-    cur.execute(
-        """
-        UPDATE music_assets
-        SET local_music_path = %s,
-            download_status = %s,
-            downloaded_at = CASE WHEN %s IS NOT NULL THEN CURRENT_TIMESTAMP ELSE downloaded_at END,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE music_id = %s
-        """,
-        (str(music_path) if music_path else None, 'downloaded' if music_path else 'missing', str(music_path) if music_path else None, key),
-    )
-
-
-def main() -> int:
+def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('raw_payload_json')
-    parser.add_argument('--storage-root', default=os.getenv('DOUYIN_STORAGE_ROOT', './storage'))
+    parser.add_argument('input_json')
     parser.add_argument('--mysql-dsn', default=os.getenv('MYSQL_DSN'))
     parser.add_argument('--endpoint-name', default='fetch_one_video_v2')
     parser.add_argument('--source-input', default='')
     args = parser.parse_args()
 
+    payload = load_json(Path(args.input_json))
+    normalized = normalize_single_video(payload, source_input=args.source_input)
     ctx = PipelineContext(
-        storage_root=Path(args.storage_root).resolve(),
+        creators_root=CREATORS_ROOT.resolve(),
         mysql_dsn=args.mysql_dsn,
         endpoint_name=args.endpoint_name,
         source_input=args.source_input,
     )
-    payload = load_json(Path(args.raw_payload_json))
-    normalized = normalize_single_video(payload, source_input=args.source_input)
-    video_id = normalized.get('video_id') or 'unknown-video'
-    creator_slug = slugify(normalized.get('author_unique_id') or normalized.get('author_name') or 'unknown-creator')
+
+    raw_json_path = save_raw_payload(payload, ctx, normalized)
+    normalized_path = save_normalized(normalized, ctx)
     music_meta = extract_music_meta(payload)
 
-    raw_json_path = save_raw_payload(payload, ctx, video_id)
-    normalized_path = save_normalized(normalized, ctx, video_id)
+    creator_dir = creator_root(ctx, normalized)
+    downloads_dir = creator_dir / 'downloads'
+    video_id = normalized.get('video_id') or 'unknown-video'
+    creator_slug = get_creator_slug(normalized)
 
     video_path = None
     if normalized.get('play_url'):
-        video_path = download_asset(normalized.get('play_url'), ctx.storage_root / 'downloads' / 'videos' / creator_slug / str(video_id))
+        video_path = download_asset(normalized.get('play_url'), downloads_dir / 'videos' / str(video_id))
+
     music_path = None
+    music_key = slugify(str(music_meta.get('music_id') or music_meta.get('title') or f'{creator_slug}-music'))
     if music_meta.get('play_url'):
-        music_key = slugify(str(music_meta.get('music_id') or music_meta.get('title') or video_id))
-        music_path = download_asset(music_meta.get('play_url'), ctx.storage_root / 'downloads' / 'music' / creator_slug / music_key)
+        music_path = download_asset(music_meta.get('play_url'), downloads_dir / 'music' / music_key)
 
     md_path = write_analysis_md(ctx, normalized, music_meta, raw_json_path, normalized_path, video_path, music_path)
+    upsert_mysql(ctx, normalized, music_meta, raw_json_path, normalized_path, video_path, music_path, md_path)
 
-    conn = get_conn(ctx.mysql_dsn)
-    if conn:
-        with conn.cursor() as cur:
-            creator_id = upsert_creator(cur, normalized)
-            video_row_id = upsert_video(cur, creator_id, normalized, raw_json_path, normalized_path, ctx.source_input)
-            music_row_id = upsert_music(cur, music_meta)
-            link_video_music(cur, video_row_id, music_row_id)
-            insert_fetch_log(cur, 'douyin_single_video', ctx.source_input, ctx.endpoint_name, raw_json_path, normalized.get('video_id'))
-            update_download_paths(cur, normalized.get('video_id'), video_path, md_path)
-            update_music_download(cur, music_meta, music_path)
-        conn.close()
-
-    result = {
-        'video_id': normalized.get('video_id'),
+    print(json.dumps({
+        'creator_root': str(creator_dir),
         'raw_json_path': str(raw_json_path),
         'normalized_json_path': str(normalized_path),
         'local_video_path': str(video_path) if video_path else None,
         'local_music_path': str(music_path) if music_path else None,
-        'local_analysis_md_path': str(md_path),
-    }
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+        'markdown_analysis_path': str(md_path),
+    }, ensure_ascii=False, indent=2))
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    main()

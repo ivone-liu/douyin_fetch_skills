@@ -21,8 +21,8 @@ def answer_question(kb: dict, question: str) -> str:
         lines = ["Top hook patterns:"]
         for p in hooks[:5]:
             lines.append(f"- {p.get('summary')} | evidence={len(p.get('evidence_video_ids', []))} | confidence={p.get('confidence')}")
-        return "
-".join(lines)
+        return "\n".join(lines)
+        __TMP__
     if "镜头" in question or "shot" in q or "framing" in q:
         shots = [p for p in patterns if p.get("category") in {"shot_language", "camera", "framing"}]
         if not shots:
@@ -30,8 +30,8 @@ def answer_question(kb: dict, question: str) -> str:
         lines = ["Top shot-language patterns:"]
         for p in shots[:5]:
             lines.append(f"- {p.get('summary')} | evidence={len(p.get('evidence_video_ids', []))} | confidence={p.get('confidence')}")
-        return "
-".join(lines)
+        return "\n".join(lines)
+        __TMP__
     playbook = kb.get("playbook", {})
     if playbook:
         return json.dumps(playbook, ensure_ascii=False, indent=2)

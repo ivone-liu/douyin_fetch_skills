@@ -2,8 +2,8 @@
 """Read one or more local markdown analysis files and return a compact combined view.
 
 Example:
-python scripts/read_local_md.py ./storage/analysis_md/creator-slug
-python scripts/read_local_md.py ./storage/analysis_md/creator-slug/1234567890.md
+python scripts/read_local_md.py ../data/creators/creator-slug/analysis_md
+python scripts/read_local_md.py ../data/creators/creator-slug/analysis_md/1234567890.md
 """
 from __future__ import annotations
 

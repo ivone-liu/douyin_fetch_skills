@@ -76,7 +76,6 @@ Next steps:
 1. Set environment variables:
    export TIKHUB_API_TOKEN='your_tikhub_token'
    export MYSQL_DSN='mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4'
-   export DOUYIN_STORAGE_ROOT='${ROOT_DIR}/storage'
 
 2. Initialize the database schema:
    mysql -h 127.0.0.1 -u <user> -p <database> < "${ROOT_DIR}/db/douyin_media_schema.sql"
@@ -84,7 +83,6 @@ Next steps:
 3. Test single-video ingestion:
    python "${ROOT_DIR}/douyin-single-video-fetcher/scripts/pipeline_ingest_single_video.py" \
      /path/to/raw_payload.json \
-     --storage-root "${ROOT_DIR}/storage" \
      --mysql-dsn "\$MYSQL_DSN" \
      --endpoint-name fetch_one_video_v2 \
      --source-input 'https://v.douyin.com/xxxx/'

@@ -1,30 +1,35 @@
 # Local Storage Layout
 
-Recommended local layout for the single-video pipeline:
+The single-video pipeline does not require a free-form external storage root.
+It writes into the skill pack itself so the storage contract stays fixed across environments.
+
+Default layout:
 
 ```text
-storage/
-  raw_api/
-    douyin_single_video/
-      2026-03-22/
-        <aweme_id>.json
-  normalized/
-    douyin_single_video/
-      <aweme_id>.json
-  downloads/
-    videos/
+openclaw-douyin-skills/
+  data/
+    creators/
       <creator-slug>/
-        <aweme_id>.mp4
-    music/
-      <creator-slug>/
-        <music-key>.mp3
-  analysis_md/
-    <creator-slug>/
-      <aweme_id>.md
+        raw_api/
+          douyin_single_video/
+            <yyyy-mm-dd>/
+              <aweme_id>.json
+        normalized/
+          douyin_single_video/
+            <aweme_id>.json
+        downloads/
+          videos/
+            <aweme_id>.<ext>
+          music/
+            <music-key>.<ext>
+        analysis_md/
+          <aweme_id>.md
 ```
 
 Rules:
+- each creator has one dedicated subtree under `data/creators/`
 - raw JSON is immutable evidence
 - normalized JSON is the compact machine record
-- markdown is the downstream analysis source
-- database stores only the searchable, high-value index fields
+- markdown is the preferred downstream analysis source
+- database stores only searchable, high-value index fields
+- scripts derive this root from their own location, so path conventions stay stable after install

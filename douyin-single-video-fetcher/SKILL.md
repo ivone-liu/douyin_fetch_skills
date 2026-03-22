@@ -45,19 +45,29 @@ This skill should produce all of the following where possible:
 
 ## Local file policy
 
-Treat local storage as three layers:
+Use an internal data root inside the skill pack instead of a user-configured storage directory.
+The pipeline derives its storage root from the script location and writes to:
+- `{baseDir}/../data/creators/<creator-slug>/...`
+
+That means each creator automatically gets one dedicated subtree inside the shared pack data directory.
+
+Treat creator storage as three layers:
 
 ### Layer 1: raw evidence
 Store the full TikHub response unchanged under:
-- `raw_api/douyin_single_video/<date>/<video_id>.json`
+- `{baseDir}/../data/creators/<creator-slug>/raw_api/douyin_single_video/<date>/<video_id>.json`
 
 ### Layer 2: normalized record
 Store a compact normalized view under:
-- `normalized/douyin_single_video/<video_id>.json`
+- `{baseDir}/../data/creators/<creator-slug>/normalized/douyin_single_video/<video_id>.json`
 
 ### Layer 3: analysis document
 Store one markdown file per video under:
-- `analysis_md/<creator-slug>/<video_id>.md`
+- `{baseDir}/../data/creators/<creator-slug>/analysis_md/<video_id>.md`
+
+Downloads live alongside those layers under:
+- `{baseDir}/../data/creators/<creator-slug>/downloads/videos/<video_id>.*`
+- `{baseDir}/../data/creators/<creator-slug>/downloads/music/<music-key>.*`
 
 Downstream analysis should read the markdown file first.
 The raw JSON is for traceability, not for repeated semantic analysis.
@@ -150,7 +160,6 @@ Use these helpers together:
 Recommended:
 - `TIKHUB_API_TOKEN`
 - `MYSQL_DSN`
-- `DOUYIN_STORAGE_ROOT`
 
 ## Database schema
 

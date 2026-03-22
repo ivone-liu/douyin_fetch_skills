@@ -2,7 +2,7 @@
 """Build a lightweight creator KB from local markdown analysis documents.
 
 Usage:
-python scripts/build_kb_from_md.py ./storage/analysis_md/creator-slug ./kb/creator-slug
+python scripts/build_kb_from_md.py ../data/creators/creator-slug/analysis_md ./kb/creator-slug
 """
 from __future__ import annotations
 

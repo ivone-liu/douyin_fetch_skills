@@ -118,8 +118,7 @@ def write_outputs(output_dir: Path, kb: Dict[str, Any]) -> None:
         md.append(f"### {section}")
         for item in kb.get("playbook", {}).get(section, []):
             md.append(f"- {item}")
-    (output_dir / "knowledge-base.md").write_text("
-".join(md), encoding="utf-8")
+    (output_dir / "knowledge-base.md").write_text("\n".join(md), encoding="utf-8")
 
 
 def main() -> int:
