@@ -11,9 +11,9 @@ What it does:
 7. update MySQL with local paths and statuses
 
 Default storage behavior:
-- no external storage root is required
-- data is written inside this skill pack under ../data/creators/<creator-slug>/...
-- this makes the storage contract deterministic across installs
+- no repo-local storage root is required
+- data is written under ~/.openclaw/workspace/data/creators/<creator-slug>/...
+- OPENCLAW_WORKSPACE_DATA_ROOT can override the root when needed
 
 Example:
 python scripts/pipeline_ingest_single_video.py raw_payload.json   --mysql-dsn 'mysql://user:pass@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4'   --endpoint-name fetch_one_video_v2   --source-input 'https://v.douyin.com/xxxx/'
@@ -42,9 +42,14 @@ except Exception:
 from fetch_single_video import normalize_single_video
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
+import sys
 PACK_ROOT = SKILL_DIR.parent
-DATA_ROOT = PACK_ROOT / 'data'
-CREATORS_ROOT = DATA_ROOT / 'creators'
+if str(PACK_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACK_ROOT))
+
+from common.storage import get_creators_root
+
+CREATORS_ROOT = get_creators_root()
 
 
 @dataclass

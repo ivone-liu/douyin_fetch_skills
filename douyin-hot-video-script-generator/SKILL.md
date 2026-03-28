@@ -77,6 +77,14 @@ The output should include:
 State where the script is grounded in KB evidence and where it is an inference.
 Do not claim the script will definitely go viral.
 
+
+## Output storage
+
+When this skill writes generated scripts, save them under:
+- `~/.openclaw/workspace/data/creators/<creator-slug>/generated_scripts/`
+
+Never write generated script artifacts into the skill pack directory.
+
 ## Output formats
 
 Preferred outputs:

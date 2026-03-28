@@ -2,14 +2,23 @@
 """Generate a structured script draft from a creator knowledge base.
 
 Usage:
-python scripts/generate_script.py kb/creator-slug/knowledge-base.json request.json
+python scripts/generate_script.py knowledge-base.json request.json
+python scripts/generate_script.py knowledge-base.json request.json --output ~/.openclaw/workspace/data/creators/<slug>/generated_scripts/demo.json
 """
 from __future__ import annotations
 
+import argparse
 import json
-import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
+
+PACK_ROOT = Path(__file__).resolve().parents[2]
+import sys
+if str(PACK_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACK_ROOT))
+
+from common.storage import default_generated_script_dir, slugify
 
 
 def ranked_patterns(kb: dict, categories: List[str]) -> List[dict]:
@@ -42,14 +51,7 @@ def build_hook_line(topic: str, hook_hint: str) -> str:
     return f"你以为{topic}的重点在后面，其实一开始那一下就决定了结果。"
 
 
-def main() -> int:
-    if len(sys.argv) != 3:
-        print('Usage: generate_script.py knowledge-base.json request.json', file=sys.stderr)
-        return 2
-
-    kb = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-    req = json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
-
+def generate_script_payload(kb: dict, req: dict) -> dict:
     topic = req.get('topic') or req.get('product') or '未命名主题'
     audience = req.get('audience') or '泛用户'
     goal = req.get('goal') or '提高完播和互动'
@@ -110,7 +112,7 @@ def main() -> int:
         {
             'beat': 5,
             'purpose': 'payoff',
-            'script': f'总结用户做完这个动作后会得到的具体收益，让结果可感知。',
+            'script': '把改完之后的具体收益说成观众能立刻感知的变化。',
             'suggested_shot': shot_hint,
             'on_screen_text': '改完之后，结果会很不一样',
             'dialogue_move': '结果承诺',
@@ -131,7 +133,7 @@ def main() -> int:
         {'shot_id': 3, 'purpose': 'proof/demo', 'shot_hint': '细节特写或 before-after 对比', 'movement_hint': first_summary(shot_patterns[2:], 'push'), 'transition_hint': first_summary(packaging_patterns[2:], 'match_cut')},
     ]
 
-    result = {
+    return {
         'idea': {
             'topic_angle': topic,
             'audience': audience,
@@ -163,6 +165,40 @@ def main() -> int:
             *([f"Risk flag from KB: {pattern['summary']}" for pattern in risk_patterns] or [])
         ],
     }
+
+
+def default_output_path(kb_path: Path, topic: str) -> Path:
+    creator_slug = kb_path.parent.parent.name if kb_path.parent.name == 'kb' else slugify((kb_path.stem or 'unknown'))
+    out_dir = default_generated_script_dir(creator_slug)
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    return out_dir / f'{timestamp}_{slugify(topic)[:80]}.json'
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('knowledge_base_json')
+    parser.add_argument('request_json')
+    parser.add_argument('--output')
+    args = parser.parse_args()
+
+    kb_path = Path(args.knowledge_base_json).expanduser()
+    request_path = Path(args.request_json).expanduser()
+    kb = json.loads(kb_path.read_text(encoding='utf-8'))
+    req = json.loads(request_path.read_text(encoding='utf-8'))
+    result = generate_script_payload(kb, req)
+
+    if args.output:
+        out_path = Path(args.output).expanduser()
+    elif req.get('save_output', True):
+        out_path = default_output_path(kb_path, str(req.get('topic') or req.get('product') or 'script'))
+    else:
+        out_path = None
+
+    if out_path:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        result['_saved_to'] = str(out_path)
+
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

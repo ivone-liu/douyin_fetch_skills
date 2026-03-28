@@ -2,7 +2,7 @@
 """Build a structured creator knowledge base from normalized videos and optional analysis rows.
 
 Usage:
-python scripts/build_kb.py normalized_videos.json output_dir [video_analysis.jsonl]
+python scripts/build_kb.py normalized_videos.json [output_dir] [video_analysis.jsonl]
 """
 from __future__ import annotations
 
@@ -12,6 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+PACK_ROOT = Path(__file__).resolve().parents[2]
+import sys
+if str(PACK_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACK_ROOT))
+
+from common.storage import creator_root, detect_creator_slug_from_path
 from build_kb_from_md import build_kb as build_kb_from_rows
 
 
@@ -112,21 +118,27 @@ def write_outputs(output_dir: Path, kb: Dict[str, Any]) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) not in (3, 4):
-        print("Usage: build_kb.py normalized_videos.json output_dir [video_analysis.jsonl]", file=sys.stderr)
+    if len(sys.argv) not in (2, 3, 4):
+        print("Usage: build_kb.py normalized_videos.json [output_dir] [video_analysis.jsonl]", file=sys.stderr)
         return 2
-    videos = load_json(Path(sys.argv[1]))
+    normalized_path = Path(sys.argv[1]).expanduser()
+    output_dir_arg = Path(sys.argv[2]).expanduser() if len(sys.argv) >= 3 else None
+    analysis_rows = load_analysis_rows(Path(sys.argv[3]).expanduser() if len(sys.argv) == 4 else None)
+    videos = load_json(normalized_path)
     if not isinstance(videos, list):
         videos = videos.get("items") or []
-    analysis_rows = load_analysis_rows(Path(sys.argv[3]) if len(sys.argv) == 4 else None)
     kb = build_kb_from_rows(analysis_rows) if analysis_rows else fallback_kb(videos)
     if videos and kb.get('creator', {}).get('display_name') == 'unknown-creator':
         kb['creator'] = make_creator(videos)
     if videos:
         kb['dataset']['video_count'] = len(videos)
         kb['dataset']['time_range'] = timestamp_range(videos)
-    write_outputs(Path(sys.argv[2]), kb)
-    print(f"Wrote structured KB to {sys.argv[2]}")
+    output_dir = output_dir_arg
+    if output_dir is None:
+        slug = detect_creator_slug_from_path(normalized_path) or kb.get('creator', {}).get('unique_id') or kb.get('creator', {}).get('creator_key') or 'unknown-creator'
+        output_dir = creator_root(str(slug)) / 'kb'
+    write_outputs(output_dir, kb)
+    print(f"Wrote structured KB to {output_dir}")
     return 0
 
 

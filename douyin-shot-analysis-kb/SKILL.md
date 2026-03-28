@@ -59,11 +59,11 @@ It must have:
 ## Knowledge base file layout
 
 Preferred output layout:
-- `kb/creator-slug/knowledge-base.json`
-- `kb/creator-slug/knowledge-base.md`
-- `kb/creator-slug/patterns.json`
-- `kb/creator-slug/sample-index.json`
-- `kb/creator-slug/video-index.json`
+- `~/.openclaw/workspace/data/creators/creator-slug/kb/knowledge-base.json`
+- `~/.openclaw/workspace/data/creators/creator-slug/kb/knowledge-base.md`
+- `~/.openclaw/workspace/data/creators/creator-slug/kb/patterns.json`
+- `~/.openclaw/workspace/data/creators/creator-slug/kb/sample-index.json`
+- `~/.openclaw/workspace/data/creators/creator-slug/kb/video-index.json`
 
 Optional upstream analysis inputs:
 - `analysis/creator-slug/video-analysis.jsonl`

@@ -2,7 +2,8 @@
 """Build a structured creator KB from local markdown analysis documents.
 
 Usage:
-python scripts/build_kb_from_md.py ../data/creators/creator-slug/analysis_md ./kb/creator-slug
+python scripts/build_kb_from_md.py ~/.openclaw/workspace/data/creators/creator-slug/analysis_md
+python scripts/build_kb_from_md.py ~/.openclaw/workspace/data/creators/creator-slug/analysis_md ~/.openclaw/workspace/data/creators/creator-slug/kb
 """
 from __future__ import annotations
 
@@ -13,6 +14,13 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
+
+PACK_ROOT = Path(__file__).resolve().parents[2]
+import sys
+if str(PACK_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACK_ROOT))
+
+from common.storage import default_kb_dir_for_analysis_md
 
 
 JSON_BLOCK_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -344,11 +352,11 @@ def build_kb(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print('Usage: build_kb_from_md.py md_dir output_dir', file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print('Usage: build_kb_from_md.py md_dir [output_dir]', file=sys.stderr)
         return 2
-    md_dir = Path(sys.argv[1])
-    out_dir = Path(sys.argv[2])
+    md_dir = Path(sys.argv[1]).expanduser()
+    out_dir = Path(sys.argv[2]).expanduser() if len(sys.argv) == 3 else default_kb_dir_for_analysis_md(md_dir)
     rows = [parse_md(p) for p in sorted(md_dir.rglob('*.md'))]
     kb = build_kb(rows)
     write_outputs(out_dir, kb, rows)

@@ -27,7 +27,7 @@ openclaw-douyin-skills/
 ```
 
 Rules:
-- each creator has one dedicated subtree under `data/creators/`
+- each creator has one dedicated subtree under `~/.openclaw/workspace/data/creators/`
 - raw JSON is immutable evidence
 - normalized JSON is the compact machine record
 - markdown is the preferred downstream analysis source

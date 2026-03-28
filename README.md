@@ -11,15 +11,16 @@
 
 ## 项目包含的 skill
 
-当前包含 5 个 skill：
+当前包含 6 个 skill：
 
 1. `douyin-subscription-manager`
 2. `douyin-video-harvester`
 3. `douyin-shot-analysis-kb`
 4. `douyin-hot-video-script-generator`
 5. `douyin-single-video-fetcher`
+6. `douyin-news-video-director`
 
-这 5 个 skill 不是并列重复关系，而是一条链路上的不同环节。
+这 6 个 skill 不是并列重复关系，而是一条链路上的不同环节。
 
 ## 这套项目解决什么问题
 
@@ -85,18 +86,18 @@ openclaw-douyin-skills/
 
 ## 数据存在哪里
 
-这套项目的数据根目录固定封装在 skill pack 里，不依赖额外的自由配置目录。
+这套项目的数据根目录固定在 OpenClaw workspace 下，不依赖 repo 内部目录。
 
 所有本地数据都放在：
 
 ```text
-openclaw-douyin-skills/data/
+~/.openclaw/workspace/data/
 ```
 
 其中每个博主一个子目录：
 
 ```text
-openclaw-douyin-skills/data/creators/<creator-slug>/
+~/.openclaw/workspace/data/creators/<creator-slug>/
 ```
 
 这个约定是项目的一部分，不需要你再单独配置一个 `DOUYIN_STORAGE_ROOT`。这样做的目的很直接：
@@ -114,7 +115,7 @@ openclaw-douyin-skills/data/creators/<creator-slug>/
 示例：
 
 ```text
-data/creators/techoldman/raw_api/douyin_single_video/2026-03-22/7448118827402972455.json
+~/.openclaw/workspace/data/creators/techoldman/raw_api/douyin_single_video/2026-03-22/7448118827402972455.json
 ```
 
 用途：
@@ -130,7 +131,7 @@ data/creators/techoldman/raw_api/douyin_single_video/2026-03-22/7448118827402972
 示例：
 
 ```text
-data/creators/techoldman/normalized/douyin_single_video/7448118827402972455.json
+~/.openclaw/workspace/data/creators/techoldman/normalized/douyin_single_video/7448118827402972455.json
 ```
 
 用途：
@@ -145,7 +146,7 @@ data/creators/techoldman/normalized/douyin_single_video/7448118827402972455.json
 示例：
 
 ```text
-data/creators/techoldman/downloads/videos/7448118827402972455.mp4
+~/.openclaw/workspace/data/creators/techoldman/downloads/videos/7448118827402972455.mp4
 ```
 
 #### 4. `downloads/music/`
@@ -154,7 +155,7 @@ data/creators/techoldman/downloads/videos/7448118827402972455.mp4
 示例：
 
 ```text
-data/creators/techoldman/downloads/music/1234567890.mp3
+~/.openclaw/workspace/data/creators/techoldman/downloads/music/1234567890.mp3
 ```
 
 #### 5. `analysis_md/`
@@ -163,7 +164,7 @@ data/creators/techoldman/downloads/music/1234567890.mp3
 示例：
 
 ```text
-data/creators/techoldman/analysis_md/7448118827402972455.md
+~/.openclaw/workspace/data/creators/techoldman/analysis_md/7448118827402972455.md
 ```
 
 用途：
@@ -549,8 +550,8 @@ douyin-shot-analysis-kb/scripts/query_kb.py
 
 ```bash
 python ./douyin-shot-analysis-kb/scripts/build_kb_from_md.py \
-  ./data/creators/techoldman/analysis_md \
-  ./data/creators/techoldman/kb
+  ./~/.openclaw/workspace/data/creators/techoldman/analysis_md \
+  ./~/.openclaw/workspace/data/creators/techoldman/kb
 ```
 
 输出一般包括：
@@ -590,8 +591,31 @@ douyin-hot-video-script-generator/scripts/generate_script.py
 
 ```bash
 python ./douyin-hot-video-script-generator/scripts/generate_script.py \
-  ./data/creators/techoldman/kb/knowledge-base.json \
+  ./~/.openclaw/workspace/data/creators/techoldman/kb/knowledge-base.json \
   ./request.json
+```
+
+
+### 6. `douyin-news-video-director`
+
+用途：
+
+- 读取一个或多个已有知识库
+- 围绕外部新闻生成新的短视频角度
+- 产出完整脚本、分镜和模型提示词
+- 调用火山引擎视频生成接口并下载结果到本地
+
+主要脚本：
+
+```text
+douyin-news-video-director/scripts/generate_news_video.py
+```
+
+输出目录默认位于：
+
+```text
+~/.openclaw/workspace/data/creators/<creator-slug>/generated_scripts/news_video/
+~/.openclaw/workspace/data/creators/<creator-slug>/generated_videos/news_video/
 ```
 
 ## 推荐工作流
