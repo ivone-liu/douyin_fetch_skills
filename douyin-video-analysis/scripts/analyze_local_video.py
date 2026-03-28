@@ -339,7 +339,7 @@ def build_structured_analysis(
             ],
         },
         "shot_plan": {
-            "dominant_style": f"{media_profile.get("orientation", "unknown")}_short_form_{pace_info.get("pace", "unknown")}",
+            "dominant_style": f"{media_profile.get('orientation', 'unknown')}_short_form_{pace_info.get('pace', 'unknown')}",
             "shots": [
                 {
                     "shot_id": note["segment_id"],
