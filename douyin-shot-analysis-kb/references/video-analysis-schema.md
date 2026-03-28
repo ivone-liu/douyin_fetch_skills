@@ -14,8 +14,10 @@ Use this schema inside each markdown analysis file as a fenced `json` block unde
     "desc": "string"
   },
   "analysis_scope": {
-    "source_depth": "metadata_only|caption_plus_media_probe|manual_review|llm_video_review",
+    "source_depth": "metadata_only|caption_plus_media_probe|video_probe_plus_keyframes|manual_review|llm_video_review",
     "confidence": "low|medium|high",
+    "prerequisites_passed": true,
+    "video_download_verified": true,
     "notes": ["string"]
   },
   "positioning": {
@@ -93,6 +95,16 @@ Use this schema inside each markdown analysis file as a fenced `json` block unde
   "risks_and_limits": {
     "risk_flags": ["string"],
     "unknowns": ["string"]
+  },
+  "evidence": {
+    "local_video_path": "string",
+    "media_profile": {},
+    "scene_info": {},
+    "editing_metrics": {},
+    "engagement_profile": {},
+    "copy_profile": {},
+    "contact_sheet_path": "string|null",
+    "keyframe_paths": ["string"]
   }
 }
 ```
@@ -100,5 +112,6 @@ Use this schema inside each markdown analysis file as a fenced `json` block unde
 Rules:
 - keep every section even when fields are `unknown`
 - never invent shot-level certainty from metadata only
+- do not generate the analysis markdown at all before local video download succeeds
 - if analysis is only a scaffold, say so in `analysis_scope.notes`
-- downstream KB building should read this JSON block before reading free-form prose
+- downstream KB building should prefer rows where `analysis_scope.prerequisites_passed=true` and `source_depth` is beyond metadata-only

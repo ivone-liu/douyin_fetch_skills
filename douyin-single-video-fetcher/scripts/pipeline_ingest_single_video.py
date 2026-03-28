@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""End-to-end single-video ingestion pipeline.
-
-What it does:
-1. read a raw TikHub single-video payload
-2. save raw payload to a skill-pack-local creator directory
-3. normalize key fields
-4. upsert searchable fields into MySQL
-5. download video and music into creator-grouped local directories
-6. generate one markdown analysis file per video
-7. update MySQL with local paths and statuses
-
-Default storage behavior:
-- no repo-local storage root is required
-- data is written under ~/.openclaw/workspace/data/creators/<creator-slug>/...
-- OPENCLAW_WORKSPACE_DATA_ROOT can override the root when needed
-
-Example:
-python scripts/pipeline_ingest_single_video.py raw_payload.json   --mysql-dsn 'mysql://user:pass@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4'   --endpoint-name fetch_one_video_v2   --source-input 'https://v.douyin.com/xxxx/'
-"""
 from __future__ import annotations
 
 import argparse
@@ -28,9 +9,9 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, List
+from typing import Any, Dict, Iterable, Optional
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -50,6 +31,7 @@ if str(PACK_ROOT) not in sys.path:
 from common.storage import get_creators_root
 
 CREATORS_ROOT = get_creators_root()
+ANALYSIS_SCRIPT = PACK_ROOT / 'douyin-video-analysis' / 'scripts' / 'analyze_local_video.py'
 
 
 @dataclass
@@ -58,6 +40,7 @@ class PipelineContext:
     mysql_dsn: Optional[str]
     endpoint_name: str
     source_input: str
+    run_analysis: bool
 
 
 def slugify(value: str) -> str:
@@ -69,10 +52,6 @@ def slugify(value: str) -> str:
 
 def load_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding='utf-8'))
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def today_dir() -> str:
@@ -121,8 +100,7 @@ def choose_extension(url: Optional[str], content_type: Optional[str], fallback: 
         if ext:
             return ext
     if url:
-        path = urlparse(url).path
-        ext = Path(path).suffix
+        ext = Path(urlparse(url).path).suffix
         if ext:
             return ext
     return fallback
@@ -139,304 +117,41 @@ def creator_root(ctx: PipelineContext, normalized: Dict[str, Any]) -> Path:
 
 
 def save_raw_payload(payload: Dict[str, Any], ctx: PipelineContext, normalized: Dict[str, Any]) -> Path:
-    video_id = normalized.get('video_id') or 'unknown-video'
     out = creator_root(ctx, normalized) / 'raw_api' / 'douyin_single_video' / today_dir()
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f'{video_id}.json'
+    path = out / f"{normalized.get('video_id') or 'unknown-video'}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
     return path
 
 
 def save_normalized(normalized: Dict[str, Any], ctx: PipelineContext) -> Path:
-    video_id = normalized.get('video_id') or 'unknown-video'
     out = creator_root(ctx, normalized) / 'normalized' / 'douyin_single_video'
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f'{video_id}.json'
+    path = out / f"{normalized.get('video_id') or 'unknown-video'}.json"
     path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
     return path
 
 
-def download_asset(url: Optional[str], path: Path) -> Optional[Path]:
+def download_asset(url: Optional[str], path: Path) -> tuple[Optional[Path], Optional[str]]:
     if not url:
-        return None
+        return None, 'missing_url'
     path.parent.mkdir(parents=True, exist_ok=True)
     req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urlopen(req, timeout=60) as resp:
-        content_type = resp.headers.get('Content-Type')
-        if path.suffix == '':
-            path = path.with_suffix(choose_extension(url, content_type, '.bin'))
-        with open(path, 'wb') as f:
-            shutil.copyfileobj(resp, f)
-    return path
-
-
-def run_ffprobe(path: Optional[Path]) -> Dict[str, Any]:
-    if not path or not path.exists():
-        return {}
-    if shutil.which('ffprobe') is None:
-        return {'available': False, 'reason': 'ffprobe_not_installed'}
-    cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(path)]
     try:
-        raw = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-        return {'available': True, 'data': json.loads(raw.decode('utf-8'))}
+        with urlopen(req, timeout=120) as resp:
+            content_type = resp.headers.get('Content-Type')
+            if path.suffix == '':
+                path = path.with_suffix(choose_extension(url, content_type, '.bin'))
+            with open(path, 'wb') as f:
+                shutil.copyfileobj(resp, f)
+        return path, None
     except Exception as exc:
-        return {'available': False, 'reason': str(exc)}
-
-
-def infer_script_shape(desc: str) -> Dict[str, Any]:
-    desc = desc or ''
-    if any(x in desc for x in ['为什么', '为何', '到底', '?', '？']):
-        hook = 'question_hook'
-    elif any(x in desc for x in ['3个', '5个', '10个', '步骤', '方法', '公式']):
-        hook = 'promise_hook'
-    elif any(x in desc for x in ['我发现', '以前', '后来', '直到']):
-        hook = 'story_hook'
-    elif len(desc) <= 12:
-        hook = 'direct_statement'
-    else:
-        hook = 'statement_hook'
-
-    if any(x in desc for x in ['教程', '步骤', '方法', '怎么做']):
-        structure = 'problem -> steps -> result -> cta'
-        archetype = 'educational'
-    elif any(x in desc for x in ['对比', '区别', '哪个好', '测评']):
-        structure = 'problem -> comparison -> verdict -> cta'
-        archetype = 'comparison'
-    elif any(x in desc for x in ['我发现', '以前', '后来', '踩坑']):
-        structure = 'story -> realization -> lesson -> cta'
-        archetype = 'story'
-    elif any(x in desc for x in ['清单', '合集', '盘点', '推荐']):
-        structure = 'hook -> list -> takeaway -> cta'
-        archetype = 'listicle'
-    else:
-        structure = 'problem -> explanation -> action -> cta'
-        archetype = 'unknown'
-    return {'hook_type': hook, 'script_structure': structure, 'content_archetype': archetype}
-
-
-def infer_media_notes(video_probe: Dict[str, Any], music_probe: Dict[str, Any]) -> Dict[str, Any]:
-    notes = {
-        'shot_language_guess': 'unknown',
-        'editing_rhythm_guess': 'unknown',
-        'audio_notes': [],
-        'confidence': 'low',
-    }
-    vdata = (video_probe or {}).get('data') or {}
-    streams = vdata.get('streams') or []
-    vstreams = [s for s in streams if s.get('codec_type') == 'video']
-    if vstreams:
-        width = vstreams[0].get('width')
-        height = vstreams[0].get('height')
-        fps_expr = vstreams[0].get('avg_frame_rate') or vstreams[0].get('r_frame_rate')
-        notes['audio_notes'].append(f'video_resolution={width}x{height}')
-        notes['audio_notes'].append(f'video_fps={fps_expr}')
-        notes['shot_language_guess'] = 'needs_visual_model_or_manual_review'
-        notes['editing_rhythm_guess'] = 'needs_frame_level_cut_detection'
-    if (music_probe or {}).get('available'):
-        notes['audio_notes'].append('music_file_downloaded')
-    return notes
-
-
-def build_structured_analysis(normalized: Dict[str, Any], script_shape: Dict[str, Any], media_notes: Dict[str, Any]) -> Dict[str, Any]:
-    desc = normalized.get('desc') or ''
-    beats: List[Dict[str, Any]] = [
-        {
-            'beat_id': 1,
-            'beat_type': 'hook',
-            'purpose': 'Open with the caption-level promise or problem.',
-            'time_range': 'unknown',
-            'summary': desc[:40] if desc else 'Caption-level hook placeholder',
-            'proof_type': 'unknown',
-        },
-        {
-            'beat_id': 2,
-            'beat_type': 'delivery',
-            'purpose': 'Explain the core claim, method, or comparison.',
-            'time_range': 'unknown',
-            'summary': script_shape['script_structure'],
-            'proof_type': 'claim',
-        },
-        {
-            'beat_id': 3,
-            'beat_type': 'cta',
-            'purpose': 'End with an interaction or conversion action if present.',
-            'time_range': 'unknown',
-            'summary': 'CTA placeholder pending transcript or manual review.',
-            'proof_type': 'unknown',
-        },
-    ]
-    return {
-        'analysis_version': '1.0.0',
-        'video': {
-            'video_id': normalized.get('video_id'),
-            'author_name': normalized.get('author_name'),
-            'author_unique_id': normalized.get('author_unique_id'),
-            'author_sec_user_id': normalized.get('author_sec_user_id'),
-            'create_time': normalized.get('create_time'),
-            'duration_ms': normalized.get('duration_ms'),
-            'desc': desc,
-        },
-        'analysis_scope': {
-            'source_depth': 'caption_plus_media_probe',
-            'confidence': 'low',
-            'notes': [
-                'This is a structured scaffold derived from caption text and media probes, not a full direct video reading.',
-                'Beat timing, shot details, and dialogue tactics require transcript, frame review, or manual annotation for high confidence.',
-            ],
-        },
-        'positioning': {
-            'primary_goal': 'unknown',
-            'secondary_goals': [],
-            'content_archetype': script_shape['content_archetype'],
-            'sub_archetypes': [],
-            'target_audience': 'unknown',
-        },
-        'hook': {
-            'hook_type': script_shape['hook_type'],
-            'hook_text': desc[:80],
-            'visual_hook': media_notes['shot_language_guess'],
-            'emotion': 'unknown',
-            'promise': desc[:80],
-            'time_range': 'unknown',
-        },
-        'narrative': {
-            'structure_formula': script_shape['script_structure'],
-            'beats': beats,
-        },
-        'shot_plan': {
-            'dominant_style': media_notes['shot_language_guess'],
-            'shots': [
-                {
-                    'shot_id': 1,
-                    'beat_id': 1,
-                    'time_range': 'unknown',
-                    'shot_size': 'unknown',
-                    'camera_angle': 'unknown',
-                    'camera_movement': 'unknown',
-                    'subject': 'unknown',
-                    'scene_task': 'hook_delivery',
-                    'transition_in': 'unknown',
-                    'transition_out': 'unknown',
-                    'confidence': 'low',
-                }
-            ],
-        },
-        'dialogue': {
-            'delivery_style': 'unknown',
-            'structure': script_shape['script_structure'],
-            'rhetorical_moves': [],
-            'cta_type': 'unknown',
-        },
-        'editing_packaging': {
-            'pace': 'unknown',
-            'subtitle_style': 'unknown',
-            'transition_types': [],
-            'packaging_elements': [],
-            'audio_strategy': 'music_file_downloaded' if 'music_file_downloaded' in media_notes['audio_notes'] else 'unknown',
-        },
-        'persuasion': {
-            'emotion_triggers': [],
-            'credibility_signals': [],
-            'conversion_devices': [],
-        },
-        'reusable_patterns': {
-            'opening_formula': desc[:80],
-            'structure_formula': script_shape['script_structure'],
-            'shot_formula': media_notes['shot_language_guess'],
-            'dialogue_formula': '',
-            'applicable_scenarios': [],
-            'not_applicable_scenarios': ['Do not treat this scaffold as frame-level truth without manual review.'],
-        },
-        'risks_and_limits': {
-            'risk_flags': ['scaffold_only'],
-            'unknowns': [
-                'exact beat timing unknown',
-                'shot size and camera movement unknown',
-                'dialogue tactics unknown',
-            ],
-        },
-    }
-
-
-def write_analysis_md(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: Dict[str, Any], raw_json_path: Path,
-                      normalized_path: Path, video_path: Optional[Path], music_path: Optional[Path]) -> Path:
-    creator_dir = creator_root(ctx, normalized)
-    video_id = normalized.get('video_id') or 'unknown-video'
-    out_dir = creator_dir / 'analysis_md'
-    out_dir.mkdir(parents=True, exist_ok=True)
-    md_path = out_dir / f'{video_id}.md'
-
-    script_shape = infer_script_shape(normalized.get('desc') or '')
-    video_probe = run_ffprobe(video_path)
-    music_probe = run_ffprobe(music_path)
-    media_notes = infer_media_notes(video_probe, music_probe)
-    structured = build_structured_analysis(normalized, script_shape, media_notes)
-    lines = [
-        f'# Douyin Video Analysis - {video_id}',
-        '',
-        '## Source',
-        f'- source_input: {ctx.source_input or ""}',
-        f'- endpoint_name: {ctx.endpoint_name}',
-        f'- raw_json_path: {raw_json_path}',
-        f'- normalized_json_path: {normalized_path}',
-        f'- local_video_path: {video_path or ""}',
-        f'- local_music_path: {music_path or ""}',
-        f'- generated_at: {utc_now()}',
-        '',
-        '## Basic metadata',
-        f'- video_id: {normalized.get("video_id")}',
-        f'- author_name: {normalized.get("author_name")}',
-        f'- author_unique_id: {normalized.get("author_unique_id")}',
-        f'- create_time: {normalized.get("create_time")}',
-        f'- duration_ms: {normalized.get("duration_ms")}',
-        f'- digg_count: {normalized.get("digg_count")}',
-        f'- comment_count: {normalized.get("comment_count")}',
-        f'- share_count: {normalized.get("share_count")}',
-        '',
-        '## Text and script hypothesis',
-        f'- desc: {normalized.get("desc") or ""}',
-        f'- hook_type: {script_shape["hook_type"]}',
-        f'- script_structure: {script_shape["script_structure"]}',
-        f'- content_archetype: {script_shape["content_archetype"]}',
-        '- note: this section is a structured scaffold inferred from caption text and media probes. It is not a frame-level semantic read of the video.',
-        '',
-        '## Media asset notes',
-        f'- play_url: {normalized.get("play_url") or ""}',
-        f'- music_title: {normalized.get("music_title") or music_meta.get("title") or ""}',
-        f'- music_author: {normalized.get("music_author") or music_meta.get("author_name") or ""}',
-        f'- music_play_url: {music_meta.get("play_url") or ""}',
-        '',
-        '## Video and music observations',
-        f'- shot_language_guess: {media_notes["shot_language_guess"]}',
-        f'- editing_rhythm_guess: {media_notes["editing_rhythm_guess"]}',
-    ]
-    for item in media_notes['audio_notes']:
-        lines.append(f'- {item}')
-    lines.extend([
-        '',
-        '## Structured analysis JSON',
-        '```json',
-        json.dumps(structured, ensure_ascii=False, indent=2),
-        '```',
-        '',
-        '## Production notes',
-        '- This markdown file is the preferred downstream analysis source.',
-        '- Read the structured JSON block first when building KB entries or generating scripts.',
-        '- If deeper visual or audio analysis is needed, enrich this file rather than re-reading raw API payloads each time.',
-        '',
-        '## Uncertainty',
-        '- Shot language and editing rhythm remain low-confidence until frame-level analysis or manual review is added.',
-        '- TikHub metadata alone cannot prove camera motion, cut timing, or rhetorical delivery.',
-    ])
-    md_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-    return md_path
+        return None, str(exc)
 
 
 def parse_mysql_dsn(dsn: str) -> Dict[str, Any]:
     from urllib.parse import urlparse, parse_qs
     parsed = urlparse(dsn)
-    if parsed.scheme not in {'mysql'}:
-        raise ValueError('MYSQL_DSN must start with mysql://')
     qs = parse_qs(parsed.query)
     return {
         'host': parsed.hostname or '127.0.0.1',
@@ -457,7 +172,8 @@ def with_mysql(ctx: PipelineContext):
     return pymysql.connect(**parse_mysql_dsn(ctx.mysql_dsn))
 
 
-def parse_create_time(value: Any) -> Optional[datetime]:
+def parse_create_time(value: Any):
+    from datetime import datetime
     if value in (None, ''):
         return None
     if isinstance(value, (int, float)):
@@ -465,18 +181,17 @@ def parse_create_time(value: Any) -> Optional[datetime]:
             return datetime.fromtimestamp(int(value))
         except Exception:
             return None
-    if isinstance(value, str):
-        raw = value.strip()
-        if raw.isdigit():
-            try:
-                return datetime.fromtimestamp(int(raw))
-            except Exception:
-                return None
-        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
-            try:
-                return datetime.strptime(raw[:19], fmt)
-            except Exception:
-                continue
+    raw = str(value).strip()
+    if raw.isdigit():
+        try:
+            return datetime.fromtimestamp(int(raw))
+        except Exception:
+            return None
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(raw[:19], fmt)
+        except Exception:
+            continue
     return None
 
 
@@ -502,26 +217,15 @@ def get_or_create_creator_id(cur, normalized: Dict[str, Any]) -> Optional[int]:
         cur.execute('SELECT id FROM creators WHERE unique_id = %s LIMIT 1', (unique_id,))
         row = cur.fetchone()
         if row:
-            cur.execute('UPDATE creators SET display_name = COALESCE(%s, display_name) WHERE id = %s', (display_name, row[0]))
             return row[0]
-        cur.execute(
-            'INSERT INTO creators (unique_id, display_name) VALUES (%s, %s)',
-            (unique_id, display_name),
-        )
-        return cur.lastrowid
-    if display_name:
-        cur.execute('INSERT INTO creators (display_name) VALUES (%s)', (display_name,))
+        cur.execute('INSERT INTO creators (unique_id, display_name) VALUES (%s, %s)', (unique_id, display_name))
         return cur.lastrowid
     return None
 
 
-def get_or_create_music_asset_id(cur, music_meta: Dict[str, Any], music_path: Optional[Path]) -> Optional[int]:
+def get_or_create_music_asset_id(cur, music_meta: Dict[str, Any], music_path: Optional[Path], music_download_status: str) -> Optional[int]:
     music_id = str(music_meta.get('music_id') or '') if music_meta.get('music_id') else None
-    play_url = music_meta.get('play_url')
-    title = music_meta.get('title')
-    author_name = music_meta.get('author_name')
-    duration_ms = music_meta.get('duration_ms')
-    if not (music_id or play_url):
+    if not (music_id or music_meta.get('play_url')):
         return None
     if music_id:
         cur.execute(
@@ -537,20 +241,26 @@ def get_or_create_music_asset_id(cur, music_meta: Dict[str, Any], music_path: Op
               download_status = VALUES(download_status),
               downloaded_at = COALESCE(VALUES(downloaded_at), downloaded_at)
             """,
-            (music_id, title, author_name, play_url, duration_ms, str(music_path) if music_path else None, 'downloaded' if music_path else 'pending', datetime.now() if music_path else None),
+            (
+                music_id,
+                music_meta.get('title'),
+                music_meta.get('author_name'),
+                music_meta.get('play_url'),
+                music_meta.get('duration_ms'),
+                str(music_path) if music_path else None,
+                music_download_status,
+                datetime.now() if music_path else None,
+            ),
         )
         cur.execute('SELECT id FROM music_assets WHERE music_id = %s', (music_id,))
         row = cur.fetchone()
         return row[0] if row else None
-    cur.execute(
-        'INSERT INTO music_assets (title, author_name, play_url, duration_ms, local_music_path, download_status, downloaded_at) VALUES (%s, %s, %s, %s, %s, %s, %s)',
-        (title, author_name, play_url, duration_ms, str(music_path) if music_path else None, 'downloaded' if music_path else 'pending', datetime.now() if music_path else None),
-    )
-    return cur.lastrowid
+    return None
 
 
 def upsert_mysql(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: Dict[str, Any], raw_json_path: Path,
-                 normalized_path: Path, video_path: Optional[Path], music_path: Optional[Path], md_path: Path) -> None:
+                 normalized_path: Path, video_path: Optional[Path], music_path: Optional[Path],
+                 download_status: str, analysis_status: str, md_path: Optional[Path], music_download_status: str) -> None:
     conn = with_mysql(ctx)
     if conn is None:
         return
@@ -586,8 +296,8 @@ def upsert_mysql(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: D
               local_analysis_md_path = VALUES(local_analysis_md_path),
               download_status = VALUES(download_status),
               analysis_status = VALUES(analysis_status),
-              downloaded_at = VALUES(downloaded_at),
-              analyzed_at = VALUES(analyzed_at)
+              downloaded_at = COALESCE(VALUES(downloaded_at), downloaded_at),
+              analyzed_at = COALESCE(VALUES(analyzed_at), analyzed_at)
             """,
             (
                 video_id,
@@ -606,14 +316,14 @@ def upsert_mysql(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: D
                 str(raw_json_path),
                 str(normalized_path),
                 str(video_path) if video_path else None,
-                str(md_path),
-                'downloaded' if video_path else 'pending',
-                'completed',
+                str(md_path) if md_path else None,
+                download_status,
+                analysis_status,
                 datetime.now() if video_path else None,
-                datetime.now(),
+                datetime.now() if md_path else None,
             ),
         )
-        music_asset_id = get_or_create_music_asset_id(cur, music_meta, music_path)
+        music_asset_id = get_or_create_music_asset_id(cur, music_meta, music_path, music_download_status)
         if music_asset_id:
             cur.execute('SELECT id FROM videos WHERE aweme_id = %s', (video_id,))
             video_row = cur.fetchone()
@@ -636,12 +346,33 @@ def upsert_mysql(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: D
     conn.close()
 
 
+def maybe_run_analysis(normalized_path: Path, mysql_dsn: Optional[str]) -> tuple[Optional[Path], str, Dict[str, Any]]:
+    if not ANALYSIS_SCRIPT.exists():
+        return None, 'pending', {'ok': False, 'reason': 'analysis_script_missing'}
+    cmd = [sys.executable, str(ANALYSIS_SCRIPT), str(normalized_path)]
+    if mysql_dsn:
+        cmd.extend(['--mysql-dsn', mysql_dsn])
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    payload: Dict[str, Any] = {}
+    try:
+        payload = json.loads((proc.stdout or '').strip() or '{}')
+    except Exception:
+        payload = {'ok': False, 'reason': 'analysis_output_not_json', 'stdout': proc.stdout, 'stderr': proc.stderr}
+    if proc.returncode == 0 and payload.get('ok'):
+        md = payload.get('analysis_md_path')
+        return Path(md).expanduser().resolve() if md else None, 'completed', payload
+    if payload.get('reason') == 'video_not_downloaded':
+        return None, 'blocked_missing_video', payload
+    return None, 'failed', payload
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('input_json')
     parser.add_argument('--mysql-dsn', default=os.getenv('MYSQL_DSN'))
     parser.add_argument('--endpoint-name', default='fetch_one_video_v2')
     parser.add_argument('--source-input', default='')
+    parser.add_argument('--run-analysis', action='store_true', help='Run deep per-video analysis only after successful local video download.')
     args = parser.parse_args()
 
     payload = load_json(Path(args.input_json))
@@ -651,6 +382,7 @@ def main() -> None:
         mysql_dsn=args.mysql_dsn,
         endpoint_name=args.endpoint_name,
         source_input=args.source_input,
+        run_analysis=bool(args.run_analysis),
     )
 
     raw_json_path = save_raw_payload(payload, ctx, normalized)
@@ -662,17 +394,24 @@ def main() -> None:
     video_id = normalized.get('video_id') or 'unknown-video'
     creator_slug = get_creator_slug(normalized)
 
-    video_path = None
-    if normalized.get('play_url'):
-        video_path = download_asset(normalized.get('play_url'), downloads_dir / 'videos' / str(video_id))
+    video_path, video_error = download_asset(normalized.get('play_url'), downloads_dir / 'videos' / str(video_id))
+    download_status = 'downloaded' if video_path else 'failed'
 
-    music_path = None
     music_key = slugify(str(music_meta.get('music_id') or music_meta.get('title') or f'{creator_slug}-music'))
-    if music_meta.get('play_url'):
-        music_path = download_asset(music_meta.get('play_url'), downloads_dir / 'music' / music_key)
+    music_path, music_error = download_asset(music_meta.get('play_url'), downloads_dir / 'music' / music_key) if music_meta.get('play_url') else (None, 'missing_url')
+    music_download_status = 'downloaded' if music_path else ('missing_url' if music_error == 'missing_url' else 'failed')
 
-    md_path = write_analysis_md(ctx, normalized, music_meta, raw_json_path, normalized_path, video_path, music_path)
-    upsert_mysql(ctx, normalized, music_meta, raw_json_path, normalized_path, video_path, music_path, md_path)
+    md_path: Optional[Path] = None
+    analysis_status = 'pending' if video_path else 'blocked_missing_video'
+    analysis_result: Dict[str, Any] = {'ok': False, 'reason': 'analysis_not_requested'}
+    if ctx.run_analysis and video_path:
+        md_path, analysis_status, analysis_result = maybe_run_analysis(normalized_path, ctx.mysql_dsn)
+    elif ctx.run_analysis and not video_path:
+        analysis_status = 'blocked_missing_video'
+        analysis_result = {'ok': False, 'reason': 'video_not_downloaded'}
+
+    upsert_mysql(ctx, normalized, music_meta, raw_json_path, normalized_path, video_path, music_path,
+                 download_status, analysis_status, md_path, music_download_status)
 
     print(json.dumps({
         'creator_root': str(creator_dir),
@@ -680,7 +419,13 @@ def main() -> None:
         'normalized_json_path': str(normalized_path),
         'local_video_path': str(video_path) if video_path else None,
         'local_music_path': str(music_path) if music_path else None,
-        'markdown_analysis_path': str(md_path),
+        'download_status': download_status,
+        'video_download_error': video_error,
+        'music_download_status': music_download_status,
+        'music_download_error': music_error,
+        'analysis_status': analysis_status,
+        'markdown_analysis_path': str(md_path) if md_path else None,
+        'analysis_result': analysis_result,
     }, ensure_ascii=False, indent=2))
 
 

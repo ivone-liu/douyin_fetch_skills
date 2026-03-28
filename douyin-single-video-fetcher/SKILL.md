@@ -1,6 +1,6 @@
 ---
 name: douyin-single-video-fetcher
-description: Fetch one Douyin video via TikHub, persist the raw API response locally, extract high-value media fields into MySQL, download grouped video and music assets, and generate one local markdown analysis document per video. Use when the user wants a single-post ingestion pipeline instead of a full-account crawl.
+description: Fetch one Douyin video via TikHub, persist the raw API response locally, extract high-value media fields into MySQL, download grouped video and music assets, and prepare one local video for later deep analysis. Use when the user wants a single-post ingestion pipeline instead of a full-account crawl.
 compatibility: Works best in environments with TikHub API access, outbound network access, secure secret storage for TIKHUB_API_TOKEN, a writable local file system, and optional MySQL access through MYSQL_DSN.
 metadata:
   author: OpenAI
@@ -21,8 +21,7 @@ Use this skill when the user wants to:
 - keep the full TikHub response as a local JSON record
 - extract video URL and music URL into MySQL
 - download video and music into grouped local folders
-- generate a dedicated local markdown analysis file for the video
-- embed a structured analysis JSON scaffold inside that markdown file
+- optionally trigger the dedicated deep-analysis skill after the local video download succeeds
 - analyze downstream tasks by reading local markdown instead of raw JSON
 
 Do not use this skill when the user wants the entire creator history. Use `douyin-video-harvester` for that.
@@ -63,7 +62,8 @@ Store a compact normalized view under:
 - `~/.openclaw/workspace/data/creators/<creator-slug>/normalized/douyin_single_video/<video_id>.json`
 
 ### Layer 3: analysis document
-Store one markdown file per video under:
+Do not create this layer until the local video file is really downloaded and the dedicated analysis skill has run successfully.
+When it exists, store it under:
 - `~/.openclaw/workspace/data/creators/<creator-slug>/analysis_md/<video_id>.md`
 
 Downloads live alongside those layers under:
@@ -134,21 +134,21 @@ After download, update MySQL with:
 - `download_status`
 - `downloaded_at`
 
-### Step 8: generate one markdown analysis file
-As soon as download finishes, generate a markdown analysis file with:
-- source metadata
-- local file paths
-- script summary
-- hook hypothesis
-- content archetype guess
-- structured beat scaffold
-- structured shot-plan scaffold
-- editing and persuasion placeholders
-- music notes
-- uncertainty statement
-- one embedded structured JSON block for downstream KB building
+### Step 8: stop if video download failed
+If the local video file is missing or download failed:
+- do not generate markdown analysis
+- set `analysis_status` to `blocked_missing_video` or keep it `pending`
+- tell the user the analysis cannot start yet
 
-### Step 9: future analysis reads markdown first
+### Step 9: run the dedicated deep-analysis skill
+Only after local video download succeeds, run `douyin-video-analysis` to generate:
+- keyframes
+- contact sheet
+- ffprobe-based media facts
+- scene-change estimate
+- structured markdown analysis
+
+### Step 10: future analysis reads markdown first
 Any downstream query, KB build, or script generation should read the local markdown file before falling back to raw JSON.
 
 ## Suggested scripts

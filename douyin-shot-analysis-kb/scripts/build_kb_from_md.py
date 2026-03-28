@@ -144,6 +144,22 @@ def parse_md(path: Path) -> Dict[str, Any]:
     }
 
 
+
+def is_usable_analysis(row: Dict[str, Any]) -> bool:
+    data = row.get("structured") or {}
+    scope = data.get("analysis_scope") or {}
+    risks = ((data.get("risks_and_limits") or {}).get("risk_flags") or [])
+    source_depth = scope.get("source_depth") or "unknown"
+    if scope.get("prerequisites_passed") is False:
+        return False
+    if source_depth in {"metadata_only", "caption_plus_media_probe"} and ("scaffold_only" in risks or "structured_json_missing" in ((data.get("risks_and_limits") or {}).get("unknowns") or [])):
+        return False
+    return True
+
+
+def usable_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [row for row in rows if is_usable_analysis(row)]
+
 def video_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     data = row['structured']
     return {
@@ -303,6 +319,8 @@ def write_outputs(out_dir: Path, kb: Dict[str, Any], video_rows: List[Dict[str, 
         f"- video_count: {kb['dataset'].get('video_count')}",
         f"- analysis_count: {kb['dataset'].get('analysis_count')}",
         f"- confidence: {kb['dataset'].get('confidence')}",
+        f"- usable_analysis_count: {kb['dataset'].get('usable_analysis_count')}",
+        f"- discarded_low_quality_count: {kb['dataset'].get('discarded_low_quality_count')}",
         f"- source_breakdown: {json.dumps(kb['dataset'].get('source_breakdown', {}), ensure_ascii=False)}",
         '',
         '## Top pattern groups',
@@ -324,10 +342,12 @@ def write_outputs(out_dir: Path, kb: Dict[str, Any], video_rows: List[Dict[str, 
 
 
 def build_kb(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    video_index = [video_summary(row) for row in rows]
-    patterns = harvest_patterns(rows)
+    filtered = usable_rows(rows)
+    active_rows = filtered
+    video_index = [video_summary(row) for row in active_rows]
+    patterns = harvest_patterns(active_rows)
     pattern_groups = make_pattern_groups(patterns)
-    first_video = rows[0]['structured'].get('video', {}) if rows else {}
+    first_video = active_rows[0]['structured'].get('video', {}) if active_rows else (rows[0]['structured'].get('video', {}) if rows else {})
     creator = {
         'creator_key': first_video.get('author_unique_id') or first_video.get('author_name') or 'unknown-creator',
         'display_name': first_video.get('author_name') or 'unknown-creator',
@@ -338,11 +358,13 @@ def build_kb(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         'creator': creator,
         'dataset': {
             'video_count': len(rows),
-            'analysis_count': len(rows),
-            'time_range': earliest_latest(rows),
+            'analysis_count': len(active_rows),
+            'usable_analysis_count': len(filtered),
+            'time_range': earliest_latest(active_rows if active_rows else rows),
             'built_at': datetime.now(timezone.utc).isoformat(),
-            'confidence': dataset_confidence(rows),
-            'source_breakdown': source_breakdown(rows),
+            'confidence': dataset_confidence(active_rows),
+            'source_breakdown': source_breakdown(active_rows),
+            'discarded_low_quality_count': max(0, len(rows) - len(filtered)),
         },
         'pattern_groups': pattern_groups,
         'patterns': patterns,
