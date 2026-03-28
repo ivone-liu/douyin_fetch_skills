@@ -198,6 +198,95 @@ def choose_sample_timestamps(duration_sec: Optional[float], count: int = 9) -> L
     return [round(safe_start + i * step, 3) for i in range(count)]
 
 
+def build_segment_ranges(duration_sec: Optional[float], scene_times: List[float], min_segment_sec: float = 0.35) -> List[Dict[str, Any]]:
+    if not duration_sec or duration_sec <= 0:
+        return []
+    ordered = [0.0]
+    for t in scene_times:
+        try:
+            value = round(float(t), 3)
+        except Exception:
+            continue
+        if value <= 0 or value >= duration_sec:
+            continue
+        if value - ordered[-1] >= min_segment_sec:
+            ordered.append(value)
+    if duration_sec - ordered[-1] < min_segment_sec:
+        ordered[-1] = round(duration_sec, 3)
+    else:
+        ordered.append(round(duration_sec, 3))
+
+    segments: List[Dict[str, Any]] = []
+    for idx in range(len(ordered) - 1):
+        start = round(ordered[idx], 3)
+        end = round(ordered[idx + 1], 3)
+        duration = round(max(0.0, end - start), 3)
+        if duration < min_segment_sec and segments:
+            segments[-1]["end_sec"] = end
+            segments[-1]["duration_sec"] = round(segments[-1]["end_sec"] - segments[-1]["start_sec"], 3)
+            segments[-1]["time_range"] = f"{segments[-1]['start_sec']}-{segments[-1]['end_sec']}"
+            continue
+        segments.append({
+            "segment_id": len(segments) + 1,
+            "start_sec": start,
+            "end_sec": end,
+            "duration_sec": duration,
+            "time_range": f"{start}-{end}",
+            "mid_sec": round((start + end) / 2.0, 3),
+        })
+    return segments
+
+
+def align_keyframes_to_segments(segments: List[Dict[str, Any]], timestamps: List[float], frame_paths: List[Path]) -> List[Dict[str, Any]]:
+    pairs = []
+    for ts, fp in zip(timestamps, frame_paths):
+        pairs.append((round(float(ts), 3), fp))
+    for seg in segments:
+        nearest = None
+        best_dist = None
+        for ts, fp in pairs:
+            dist = abs(ts - seg["mid_sec"])
+            if best_dist is None or dist < best_dist:
+                nearest = (ts, fp)
+                best_dist = dist
+        if nearest:
+            seg["evidence_frame_time"] = nearest[0]
+            seg["evidence_frame_path"] = str(nearest[1])
+        else:
+            seg["evidence_frame_time"] = None
+            seg["evidence_frame_path"] = None
+    return segments
+
+
+def narratize_segments(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    total = len(segments)
+    if total == 0:
+        return segments
+    for idx, seg in enumerate(segments, start=1):
+        pos = idx / total
+        if pos <= 0.2:
+            role = "hook"
+            goal = "在极短时间内抓住观众，建立情绪或关系张力"
+        elif pos <= 0.45:
+            role = "setup"
+            goal = "交代场景、人物状态或观看前提"
+        elif pos <= 0.8:
+            role = "delivery"
+            goal = "推进主要情绪、动作或关系观察"
+        else:
+            role = "payoff"
+            goal = "收束情绪，留下余味或互动出口"
+        seg["narrative_role_guess"] = role
+        seg["functional_goal"] = goal
+        seg["human_review_focus"] = {
+            "hook": "看这一段是靠什么让人停下来，是文案反差、人物状态还是画面奇观",
+            "setup": "看这一段补了什么信息，是否让观众快速理解人物和氛围",
+            "delivery": "看这里如何推进情绪或动作，哪些镜头最值钱",
+            "payoff": "看结尾如何留白、回收情绪或激发评论/转发",
+        }[role]
+    return segments
+
+
 def extract_keyframes(video_path: Path, out_dir: Path, timestamps: List[float]) -> List[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     frames: List[Path] = []
