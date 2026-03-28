@@ -30,7 +30,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, List
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -182,20 +182,31 @@ def infer_script_shape(desc: str) -> Dict[str, Any]:
     desc = desc or ''
     if any(x in desc for x in ['为什么', '为何', '到底', '?', '？']):
         hook = 'question_hook'
-    elif any(x in desc for x in ['3个', '5个', '10个', '步骤', '方法']):
-        hook = 'numbered_promise'
+    elif any(x in desc for x in ['3个', '5个', '10个', '步骤', '方法', '公式']):
+        hook = 'promise_hook'
+    elif any(x in desc for x in ['我发现', '以前', '后来', '直到']):
+        hook = 'story_hook'
     elif len(desc) <= 12:
-        hook = 'short_direct_hook'
+        hook = 'direct_statement'
     else:
         hook = 'statement_hook'
 
     if any(x in desc for x in ['教程', '步骤', '方法', '怎么做']):
-        structure = 'tutorial_breakdown'
-    elif any(x in desc for x in ['我发现', '以前', '后来']):
-        structure = 'experience_story'
+        structure = 'problem -> steps -> result -> cta'
+        archetype = 'educational'
+    elif any(x in desc for x in ['对比', '区别', '哪个好', '测评']):
+        structure = 'problem -> comparison -> verdict -> cta'
+        archetype = 'comparison'
+    elif any(x in desc for x in ['我发现', '以前', '后来', '踩坑']):
+        structure = 'story -> realization -> lesson -> cta'
+        archetype = 'story'
+    elif any(x in desc for x in ['清单', '合集', '盘点', '推荐']):
+        structure = 'hook -> list -> takeaway -> cta'
+        archetype = 'listicle'
     else:
-        structure = 'statement_then_explanation'
-    return {'hook_type': hook, 'script_structure': structure}
+        structure = 'problem -> explanation -> action -> cta'
+        archetype = 'unknown'
+    return {'hook_type': hook, 'script_structure': structure, 'content_archetype': archetype}
 
 
 def infer_media_notes(video_probe: Dict[str, Any], music_probe: Dict[str, Any]) -> Dict[str, Any]:
@@ -221,6 +232,127 @@ def infer_media_notes(video_probe: Dict[str, Any], music_probe: Dict[str, Any]) 
     return notes
 
 
+def build_structured_analysis(normalized: Dict[str, Any], script_shape: Dict[str, Any], media_notes: Dict[str, Any]) -> Dict[str, Any]:
+    desc = normalized.get('desc') or ''
+    beats: List[Dict[str, Any]] = [
+        {
+            'beat_id': 1,
+            'beat_type': 'hook',
+            'purpose': 'Open with the caption-level promise or problem.',
+            'time_range': 'unknown',
+            'summary': desc[:40] if desc else 'Caption-level hook placeholder',
+            'proof_type': 'unknown',
+        },
+        {
+            'beat_id': 2,
+            'beat_type': 'delivery',
+            'purpose': 'Explain the core claim, method, or comparison.',
+            'time_range': 'unknown',
+            'summary': script_shape['script_structure'],
+            'proof_type': 'claim',
+        },
+        {
+            'beat_id': 3,
+            'beat_type': 'cta',
+            'purpose': 'End with an interaction or conversion action if present.',
+            'time_range': 'unknown',
+            'summary': 'CTA placeholder pending transcript or manual review.',
+            'proof_type': 'unknown',
+        },
+    ]
+    return {
+        'analysis_version': '1.0.0',
+        'video': {
+            'video_id': normalized.get('video_id'),
+            'author_name': normalized.get('author_name'),
+            'author_unique_id': normalized.get('author_unique_id'),
+            'author_sec_user_id': normalized.get('author_sec_user_id'),
+            'create_time': normalized.get('create_time'),
+            'duration_ms': normalized.get('duration_ms'),
+            'desc': desc,
+        },
+        'analysis_scope': {
+            'source_depth': 'caption_plus_media_probe',
+            'confidence': 'low',
+            'notes': [
+                'This is a structured scaffold derived from caption text and media probes, not a full direct video reading.',
+                'Beat timing, shot details, and dialogue tactics require transcript, frame review, or manual annotation for high confidence.',
+            ],
+        },
+        'positioning': {
+            'primary_goal': 'unknown',
+            'secondary_goals': [],
+            'content_archetype': script_shape['content_archetype'],
+            'sub_archetypes': [],
+            'target_audience': 'unknown',
+        },
+        'hook': {
+            'hook_type': script_shape['hook_type'],
+            'hook_text': desc[:80],
+            'visual_hook': media_notes['shot_language_guess'],
+            'emotion': 'unknown',
+            'promise': desc[:80],
+            'time_range': 'unknown',
+        },
+        'narrative': {
+            'structure_formula': script_shape['script_structure'],
+            'beats': beats,
+        },
+        'shot_plan': {
+            'dominant_style': media_notes['shot_language_guess'],
+            'shots': [
+                {
+                    'shot_id': 1,
+                    'beat_id': 1,
+                    'time_range': 'unknown',
+                    'shot_size': 'unknown',
+                    'camera_angle': 'unknown',
+                    'camera_movement': 'unknown',
+                    'subject': 'unknown',
+                    'scene_task': 'hook_delivery',
+                    'transition_in': 'unknown',
+                    'transition_out': 'unknown',
+                    'confidence': 'low',
+                }
+            ],
+        },
+        'dialogue': {
+            'delivery_style': 'unknown',
+            'structure': script_shape['script_structure'],
+            'rhetorical_moves': [],
+            'cta_type': 'unknown',
+        },
+        'editing_packaging': {
+            'pace': 'unknown',
+            'subtitle_style': 'unknown',
+            'transition_types': [],
+            'packaging_elements': [],
+            'audio_strategy': 'music_file_downloaded' if 'music_file_downloaded' in media_notes['audio_notes'] else 'unknown',
+        },
+        'persuasion': {
+            'emotion_triggers': [],
+            'credibility_signals': [],
+            'conversion_devices': [],
+        },
+        'reusable_patterns': {
+            'opening_formula': desc[:80],
+            'structure_formula': script_shape['script_structure'],
+            'shot_formula': media_notes['shot_language_guess'],
+            'dialogue_formula': '',
+            'applicable_scenarios': [],
+            'not_applicable_scenarios': ['Do not treat this scaffold as frame-level truth without manual review.'],
+        },
+        'risks_and_limits': {
+            'risk_flags': ['scaffold_only'],
+            'unknowns': [
+                'exact beat timing unknown',
+                'shot size and camera movement unknown',
+                'dialogue tactics unknown',
+            ],
+        },
+    }
+
+
 def write_analysis_md(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: Dict[str, Any], raw_json_path: Path,
                       normalized_path: Path, video_path: Optional[Path], music_path: Optional[Path]) -> Path:
     creator_dir = creator_root(ctx, normalized)
@@ -233,6 +365,7 @@ def write_analysis_md(ctx: PipelineContext, normalized: Dict[str, Any], music_me
     video_probe = run_ffprobe(video_path)
     music_probe = run_ffprobe(music_path)
     media_notes = infer_media_notes(video_probe, music_probe)
+    structured = build_structured_analysis(normalized, script_shape, media_notes)
     lines = [
         f'# Douyin Video Analysis - {video_id}',
         '',
@@ -259,7 +392,8 @@ def write_analysis_md(ctx: PipelineContext, normalized: Dict[str, Any], music_me
         f'- desc: {normalized.get("desc") or ""}',
         f'- hook_type: {script_shape["hook_type"]}',
         f'- script_structure: {script_shape["script_structure"]}',
-        '- note: this section is inferred from metadata and caption text. It is not a full semantic understanding of the video.',
+        f'- content_archetype: {script_shape["content_archetype"]}',
+        '- note: this section is a structured scaffold inferred from caption text and media probes. It is not a frame-level semantic read of the video.',
         '',
         '## Media asset notes',
         f'- play_url: {normalized.get("play_url") or ""}',
@@ -275,14 +409,19 @@ def write_analysis_md(ctx: PipelineContext, normalized: Dict[str, Any], music_me
         lines.append(f'- {item}')
     lines.extend([
         '',
+        '## Structured analysis JSON',
+        '```json',
+        json.dumps(structured, ensure_ascii=False, indent=2),
+        '```',
+        '',
         '## Production notes',
         '- This markdown file is the preferred downstream analysis source.',
-        '- Read this file first when building KB entries or generating scripts.',
-        '- If deeper visual or audio analysis is needed, extend this file rather than re-reading raw API payloads each time.',
+        '- Read the structured JSON block first when building KB entries or generating scripts.',
+        '- If deeper visual or audio analysis is needed, enrich this file rather than re-reading raw API payloads each time.',
         '',
         '## Uncertainty',
         '- Shot language and editing rhythm remain low-confidence until frame-level analysis or manual review is added.',
-        '- TikHub metadata alone cannot prove camera motion or cut timing.',
+        '- TikHub metadata alone cannot prove camera motion, cut timing, or rhetorical delivery.',
     ])
     md_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return md_path
@@ -313,97 +452,181 @@ def with_mysql(ctx: PipelineContext):
     return pymysql.connect(**parse_mysql_dsn(ctx.mysql_dsn))
 
 
+def parse_create_time(value: Any) -> Optional[datetime]:
+    if value in (None, ''):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(int(value))
+        except Exception:
+            return None
+    if isinstance(value, str):
+        raw = value.strip()
+        if raw.isdigit():
+            try:
+                return datetime.fromtimestamp(int(raw))
+            except Exception:
+                return None
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+            try:
+                return datetime.strptime(raw[:19], fmt)
+            except Exception:
+                continue
+    return None
+
+
+def get_or_create_creator_id(cur, normalized: Dict[str, Any]) -> Optional[int]:
+    sec_user_id = normalized.get('author_sec_user_id')
+    unique_id = normalized.get('author_unique_id')
+    display_name = normalized.get('author_name')
+    if sec_user_id:
+        cur.execute(
+            """
+            INSERT INTO creators (sec_user_id, unique_id, display_name)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+              unique_id = COALESCE(VALUES(unique_id), unique_id),
+              display_name = COALESCE(VALUES(display_name), display_name)
+            """,
+            (sec_user_id, unique_id, display_name),
+        )
+        cur.execute('SELECT id FROM creators WHERE sec_user_id = %s', (sec_user_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    if unique_id:
+        cur.execute('SELECT id FROM creators WHERE unique_id = %s LIMIT 1', (unique_id,))
+        row = cur.fetchone()
+        if row:
+            cur.execute('UPDATE creators SET display_name = COALESCE(%s, display_name) WHERE id = %s', (display_name, row[0]))
+            return row[0]
+        cur.execute(
+            'INSERT INTO creators (unique_id, display_name) VALUES (%s, %s)',
+            (unique_id, display_name),
+        )
+        return cur.lastrowid
+    if display_name:
+        cur.execute('INSERT INTO creators (display_name) VALUES (%s)', (display_name,))
+        return cur.lastrowid
+    return None
+
+
+def get_or_create_music_asset_id(cur, music_meta: Dict[str, Any], music_path: Optional[Path]) -> Optional[int]:
+    music_id = str(music_meta.get('music_id') or '') if music_meta.get('music_id') else None
+    play_url = music_meta.get('play_url')
+    title = music_meta.get('title')
+    author_name = music_meta.get('author_name')
+    duration_ms = music_meta.get('duration_ms')
+    if not (music_id or play_url):
+        return None
+    if music_id:
+        cur.execute(
+            """
+            INSERT INTO music_assets (music_id, title, author_name, play_url, duration_ms, local_music_path, download_status, downloaded_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+              title = COALESCE(VALUES(title), title),
+              author_name = COALESCE(VALUES(author_name), author_name),
+              play_url = COALESCE(VALUES(play_url), play_url),
+              duration_ms = COALESCE(VALUES(duration_ms), duration_ms),
+              local_music_path = COALESCE(VALUES(local_music_path), local_music_path),
+              download_status = VALUES(download_status),
+              downloaded_at = COALESCE(VALUES(downloaded_at), downloaded_at)
+            """,
+            (music_id, title, author_name, play_url, duration_ms, str(music_path) if music_path else None, 'downloaded' if music_path else 'pending', datetime.now() if music_path else None),
+        )
+        cur.execute('SELECT id FROM music_assets WHERE music_id = %s', (music_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    cur.execute(
+        'INSERT INTO music_assets (title, author_name, play_url, duration_ms, local_music_path, download_status, downloaded_at) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+        (title, author_name, play_url, duration_ms, str(music_path) if music_path else None, 'downloaded' if music_path else 'pending', datetime.now() if music_path else None),
+    )
+    return cur.lastrowid
+
+
 def upsert_mysql(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: Dict[str, Any], raw_json_path: Path,
                  normalized_path: Path, video_path: Optional[Path], music_path: Optional[Path], md_path: Path) -> None:
     conn = with_mysql(ctx)
     if conn is None:
         return
-    creator_slug = get_creator_slug(normalized)
     video_id = str(normalized.get('video_id') or '')
-    music_id = str(music_meta.get('music_id') or '') if music_meta.get('music_id') else None
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO creators (creator_slug, unique_id, sec_user_id, display_name, last_seen_at)
-            VALUES (%s, %s, %s, %s, NOW())
-            ON DUPLICATE KEY UPDATE
-              unique_id = VALUES(unique_id),
-              sec_user_id = VALUES(sec_user_id),
-              display_name = VALUES(display_name),
-              last_seen_at = NOW()
-            """,
-            (creator_slug, normalized.get('author_unique_id'), normalized.get('author_sec_user_id'), normalized.get('author_name')),
-        )
+        creator_id = get_or_create_creator_id(cur, normalized)
+        create_time = parse_create_time(normalized.get('create_time'))
         cur.execute(
             """
             INSERT INTO videos (
-              aweme_id, creator_slug, desc_text, create_time_raw, duration_ms,
-              play_url, cover_url, raw_json_path, normalized_json_path,
-              local_video_path, markdown_analysis_path, download_status, analysis_status,
-              digg_count, comment_count, share_count, collect_count, play_count, last_ingested_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+              aweme_id, creator_id, desc_text, create_time, duration_ms,
+              digg_count, comment_count, collect_count, share_count, play_count,
+              cover_url, play_url, source_input, raw_json_path, normalized_json_path,
+              local_video_path, local_analysis_md_path, download_status, analysis_status,
+              downloaded_at, analyzed_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
+              creator_id = VALUES(creator_id),
               desc_text = VALUES(desc_text),
-              create_time_raw = VALUES(create_time_raw),
+              create_time = VALUES(create_time),
               duration_ms = VALUES(duration_ms),
-              play_url = VALUES(play_url),
+              digg_count = VALUES(digg_count),
+              comment_count = VALUES(comment_count),
+              collect_count = VALUES(collect_count),
+              share_count = VALUES(share_count),
+              play_count = VALUES(play_count),
               cover_url = VALUES(cover_url),
+              play_url = VALUES(play_url),
+              source_input = VALUES(source_input),
               raw_json_path = VALUES(raw_json_path),
               normalized_json_path = VALUES(normalized_json_path),
               local_video_path = VALUES(local_video_path),
-              markdown_analysis_path = VALUES(markdown_analysis_path),
+              local_analysis_md_path = VALUES(local_analysis_md_path),
               download_status = VALUES(download_status),
               analysis_status = VALUES(analysis_status),
-              digg_count = VALUES(digg_count),
-              comment_count = VALUES(comment_count),
-              share_count = VALUES(share_count),
-              collect_count = VALUES(collect_count),
-              play_count = VALUES(play_count),
-              last_ingested_at = NOW()
+              downloaded_at = VALUES(downloaded_at),
+              analyzed_at = VALUES(analyzed_at)
             """,
             (
-                video_id, creator_slug, normalized.get('desc'), str(normalized.get('create_time') or ''), normalized.get('duration_ms'),
-                normalized.get('play_url'), normalized.get('cover_url'), str(raw_json_path), str(normalized_path),
-                str(video_path) if video_path else None, str(md_path),
-                'downloaded' if video_path else 'missing_video', 'completed',
-                normalized.get('digg_count'), normalized.get('comment_count'), normalized.get('share_count'),
-                normalized.get('collect_count'), normalized.get('play_count'),
+                video_id,
+                creator_id,
+                normalized.get('desc'),
+                create_time,
+                normalized.get('duration_ms'),
+                normalized.get('digg_count'),
+                normalized.get('comment_count'),
+                normalized.get('collect_count'),
+                normalized.get('share_count'),
+                normalized.get('play_count'),
+                normalized.get('cover_url'),
+                normalized.get('play_url'),
+                ctx.source_input,
+                str(raw_json_path),
+                str(normalized_path),
+                str(video_path) if video_path else None,
+                str(md_path),
+                'downloaded' if video_path else 'pending',
+                'completed',
+                datetime.now() if video_path else None,
+                datetime.now(),
             ),
         )
-        if music_id or music_meta.get('play_url'):
-            cur.execute(
-                """
-                INSERT INTO music_assets (music_id, title, author_name, duration_ms, play_url, local_music_path, download_status, last_seen_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                ON DUPLICATE KEY UPDATE
-                  title = VALUES(title),
-                  author_name = VALUES(author_name),
-                  duration_ms = VALUES(duration_ms),
-                  play_url = VALUES(play_url),
-                  local_music_path = VALUES(local_music_path),
-                  download_status = VALUES(download_status),
-                  last_seen_at = NOW()
-                """,
-                (
-                    music_id or f'music-url::{music_meta.get("play_url")}', music_meta.get('title'), music_meta.get('author_name'),
-                    music_meta.get('duration_ms'), music_meta.get('play_url'), str(music_path) if music_path else None,
-                    'downloaded' if music_path else 'missing_music_url',
-                ),
-            )
-            cur.execute(
-                """
-                INSERT INTO video_music_map (aweme_id, music_id)
-                VALUES (%s, %s)
-                ON DUPLICATE KEY UPDATE music_id = VALUES(music_id)
-                """,
-                (video_id, music_id or f'music-url::{music_meta.get("play_url")}'),
-            )
+        music_asset_id = get_or_create_music_asset_id(cur, music_meta, music_path)
+        if music_asset_id:
+            cur.execute('SELECT id FROM videos WHERE aweme_id = %s', (video_id,))
+            video_row = cur.fetchone()
+            if video_row:
+                cur.execute(
+                    """
+                    INSERT INTO video_music_map (video_id, music_id)
+                    VALUES (%s, %s)
+                    ON DUPLICATE KEY UPDATE music_id = VALUES(music_id)
+                    """,
+                    (video_row[0], music_asset_id),
+                )
         cur.execute(
             """
-            INSERT INTO api_fetch_logs (aweme_id, endpoint_name, source_input, raw_json_path, fetched_at)
-            VALUES (%s, %s, %s, %s, NOW())
+            INSERT INTO api_fetch_logs (source_type, source_input, endpoint_name, raw_json_path, aweme_id, fetched_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
             """,
-            (video_id, ctx.endpoint_name, ctx.source_input, str(raw_json_path)),
+            ('douyin_single_video', ctx.source_input, ctx.endpoint_name, str(raw_json_path), video_id),
         )
     conn.close()
 

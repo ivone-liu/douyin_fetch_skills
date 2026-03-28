@@ -22,6 +22,7 @@ Use this skill when the user wants to:
 - extract video URL and music URL into MySQL
 - download video and music into grouped local folders
 - generate a dedicated local markdown analysis file for the video
+- embed a structured analysis JSON scaffold inside that markdown file
 - analyze downstream tasks by reading local markdown instead of raw JSON
 
 Do not use this skill when the user wants the entire creator history. Use `douyin-video-harvester` for that.
@@ -139,11 +140,13 @@ As soon as download finishes, generate a markdown analysis file with:
 - local file paths
 - script summary
 - hook hypothesis
-- shot-language notes
-- editing rhythm notes
+- content archetype guess
+- structured beat scaffold
+- structured shot-plan scaffold
+- editing and persuasion placeholders
 - music notes
-- evidence references
 - uncertainty statement
+- one embedded structured JSON block for downstream KB building
 
 ### Step 9: future analysis reads markdown first
 Any downstream query, KB build, or script generation should read the local markdown file before falling back to raw JSON.

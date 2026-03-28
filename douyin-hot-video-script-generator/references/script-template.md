@@ -4,27 +4,35 @@
 - topic angle
 - audience
 - goal
+- duration target
+- constraints
+
+## Positioning
+- content archetype
+- delivery style
+- evidence patterns used
 
 ## Hook
 - first sentence
 - first visual action
 
 ## Body beats
-1. setup
-2. conflict or curiosity expansion
-3. explanation or proof
-4. payoff
-5. CTA
+1. hook
+2. setup
+3. conflict or curiosity expansion
+4. proof or demonstration
+5. payoff
+6. CTA
 
-## Suggested shots
-- shot 1
-- shot 2
-- shot 3
+## Shot plan
+- shot 1 purpose and movement
+- shot 2 purpose and movement
+- shot 3 purpose and transition
 
-## On-screen text
-- line 1
-- line 2
-- line 3
+## Dialogue tactics
+- rhetorical move 1
+- rhetorical move 2
+- CTA style
 
 ## Why this fits the KB
 - reused pattern 1
