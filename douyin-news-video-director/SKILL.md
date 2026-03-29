@@ -24,6 +24,8 @@ Use this skill when the user wants to:
 
 Do not use this skill if no KB exists yet. Build or update KBs first.
 
+For Ark 图生视频 submission, provide a reachable `reference_image_url` in request.json.
+
 ## Storage policy
 
 All outputs must go under:
@@ -69,8 +71,9 @@ The output package must include:
 
 ### Step 4: submit to Volcengine
 Use the helper script and the env in `~/.openclaw/.env`.
-Do not hardcode the model name, version, or endpoint into the skill instructions.
-Those belong in environment variables.
+Read `ARK_API_KEY` from env. Do not require extra VOLCENGINE_VIDEO_* configuration for the Ark path.
+Use the Ark task submit endpoint and task query endpoint.
+Do not hardcode secrets into the skill instructions.
 
 ### Step 5: save everything
 Always save the script package and the generation response locally.

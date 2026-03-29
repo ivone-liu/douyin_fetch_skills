@@ -11,11 +11,21 @@ Suggested request.json shape:
   "takeaway": "可选，结尾结论",
   "cta": "可选，收尾动作",
   "aspect_ratio": "9:16",
-  "duration_seconds": 12,
+  "duration_seconds": 5,
+  "reference_image_url": "https://.../cover.png",
+  "camera_fixed": false,
+  "watermark": true,
   "negative_prompt": "可选",
+  "submit_video": true,
   "kb_paths": [
     "~/.openclaw/workspace/data/creators/creator-a/kb/knowledge-base.json"
-  ],
-  "submit_video": true
+  ]
 }
 ```
+
+说明：
+- `reference_image_url` 是 Ark 图生视频提交时的必要输入。
+- 如果只想先出脚本包，不想提交视频，可以把 `submit_video` 设为 `false` 或命令行加 `--no-submit`。
+
+
+补充说明：当前 Ark 图生视频模型固定使用 `doubao-seedance-1-5-pro-251215`，不需要在请求中再传模型配置。

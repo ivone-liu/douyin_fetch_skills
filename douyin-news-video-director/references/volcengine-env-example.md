@@ -1,28 +1,15 @@
-This skill uses environment-driven Volcengine config because deployment setups vary.
+# Ark 图生视频最小环境变量
 
-Minimum required env:
-
-```bash
-VOLCENGINE_VIDEO_SUBMIT_URL=...
-```
-
-Common env:
-
-```bash
-VOLCENGINE_API_KEY=...
-VOLCENGINE_VIDEO_AUTH_SCHEME=Bearer
-VOLCENGINE_VIDEO_MODEL=...
-VOLCENGINE_VIDEO_MODEL_VERSION=...
-VOLCENGINE_VIDEO_MAX_DURATION_SECONDS=12
-VOLCENGINE_VIDEO_REQUEST_TEMPLATE_JSON='{"model":"{{model}}","prompt":"{{prompt}}","negative_prompt":"{{negative_prompt}}","duration":"{{duration_seconds}}","ratio":"{{aspect_ratio}}"}'
-VOLCENGINE_VIDEO_TASK_ID_PATHS='id,task_id,data.id,data.task_id'
-VOLCENGINE_VIDEO_STATUS_URL_TEMPLATE='https://.../{task_id}'
-VOLCENGINE_VIDEO_STATUS_PATHS='status,data.status'
-VOLCENGINE_VIDEO_RESULT_URL_PATHS='video_url,data.video_url,output.video_url'
-```
-
-You can also override the workspace data root:
+把下面内容放进 `~/.openclaw/.env`。
 
 ```bash
 OPENCLAW_WORKSPACE_DATA_ROOT=~/.openclaw/workspace/data
+ARK_API_KEY=你的_ARK_API_KEY
 ```
+
+说明：
+
+- `ARK_API_KEY` 是唯一必需的火山引擎配置。
+- 生成接口、查询接口、请求方法、查询方法、模型名、任务状态解析路径，都已经在代码里固定为 Ark 图生视频这一套，不需要再手工配置。
+- 当前模型固定使用：`doubao-seedance-1-5-pro-251215`
+- 当前默认最大时长固定按 5 秒处理，对应你提供的接口示例。

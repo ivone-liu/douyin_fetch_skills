@@ -708,3 +708,29 @@ douyin-news-video-director/scripts/generate_news_video.py
 4. 最后再做脚本生成和更深的镜头分析
 
 不要一开始就把所有增强分析都堆进来。先让这条链稳定，再谈更复杂的视觉和音乐理解。
+
+
+## Ark 图生视频最小配置
+
+`douyin-news-video-director` 现在按你给的 Ark 图生视频接口固定实现，不再要求一长串视频生成环境变量。
+
+放在 `~/.openclaw/.env` 里的最小配置只有：
+
+```bash
+OPENCLAW_WORKSPACE_DATA_ROOT=~/.openclaw/workspace/data
+ARK_API_KEY=你的_ARK_API_KEY
+```
+
+说明：
+
+- `ARK_API_KEY` 是唯一必需的火山引擎配置。
+- 代码里已经固定：
+  - 提交接口：`https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`
+  - 查询接口：`https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}`
+  - 请求方法：`POST`
+  - 查询方法：`GET`
+  - 模型：`doubao-seedance-1-5-pro-251215`
+  - 默认时长：`5` 秒
+- 之前那些 `VOLCENGINE_VIDEO_*` 环境变量，当前这版不再需要你手工配置。
+
+图生视频仍然需要在请求里提供可访问的 `reference_image_url`。这是业务输入，不是环境变量。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a news-driven short-video package from KBs and optionally submit it to Volcengine.
+"""Generate a news-driven short-video package from KBs and optionally submit it to Volcengine Ark.
 
 Usage:
 python scripts/generate_news_video.py request.json
@@ -95,6 +95,20 @@ def first_summary(patterns: List[Dict[str, Any]], fallback: str) -> str:
     return patterns[0].get('summary') if patterns else fallback
 
 
+def pick_reference_image_url(request: Dict[str, Any]) -> str:
+    for key in ('reference_image_url', 'image_url', 'news_image_url', 'cover_image_url'):
+        value = str(request.get(key) or '').strip()
+        if value:
+            return value
+    image_urls = request.get('image_urls') or []
+    if isinstance(image_urls, list):
+        for value in image_urls:
+            value = str(value or '').strip()
+            if value:
+                return value
+    return ''
+
+
 def build_news_angle(request: Dict[str, Any], patterns: List[Dict[str, Any]]) -> Dict[str, Any]:
     title = request.get('news_title') or request.get('title') or '未命名新闻'
     summary = request.get('news_summary') or request.get('summary') or ''
@@ -136,7 +150,10 @@ def build_script_package(request: Dict[str, Any], patterns: List[Dict[str, Any]]
     cta = request.get('cta') or '关注我，下一条继续拆这件事会怎么往下走。'
     voice_tone = request.get('voice_tone') or '冷静、直接、有判断'
     aspect_ratio = request.get('aspect_ratio') or '9:16'
-    duration_seconds = int(request.get('duration_seconds') or request.get('max_duration_seconds') or 12)
+    duration_seconds = int(request.get('duration_seconds') or request.get('max_duration_seconds') or 5)
+    watermark = bool(request.get('watermark', True))
+    camera_fixed = bool(request.get('camera_fixed', False))
+    reference_image_url = pick_reference_image_url(request)
 
     beats = [
         {
@@ -187,38 +204,38 @@ def build_script_package(request: Dict[str, Any], patterns: List[Dict[str, Any]]
         {
             'shot_id': 1,
             'beat_id': 1,
-            'duration_hint_sec': 2,
+            'duration_hint_sec': 1,
             'shot_prompt': f"高冲击力新闻开场，围绕“{title}”构造一秒抓人的主视觉，纵向短视频构图，{news['shot_strategy']}，{news['packaging_strategy']}，真实、现代、适合抖音新闻短视频",
         },
         {
             'shot_id': 2,
             'beat_id': 2,
-            'duration_hint_sec': 2,
+            'duration_hint_sec': 1,
             'shot_prompt': f"快速交代事件本身，展示与“{title}”直接相关的主体、动作、环境或抽象符号，镜头节奏干脆，信息密度高",
         },
         {
             'shot_id': 3,
             'beat_id': 3,
-            'duration_hint_sec': 2,
+            'duration_hint_sec': 1,
             'shot_prompt': f"从事件切到影响层，强调成本、风险、预期变化或行业震荡，画面更有压力感和对比感，突出‘为什么重要’",
         },
         {
             'shot_id': 4,
             'beat_id': 4,
-            'duration_hint_sec': 2,
+            'duration_hint_sec': 1,
             'shot_prompt': f"把观点压实，画面服务于明确判断：{news['angle']}，减少花哨元素，突出结论和态度",
         },
         {
             'shot_id': 5,
             'beat_id': 5,
-            'duration_hint_sec': 2,
+            'duration_hint_sec': 1,
             'shot_prompt': f"结尾镜头回到人、行业或未来趋势，给观众一个可带走的判断，节奏收束但不拖沓",
         },
     ]
 
     video_prompt = textwrap.dedent(f"""
-    请生成一条适合抖音/短视频信息流的纵向新闻观点视频，时长尽量使用模型支持的最长时长，画幅 {aspect_ratio}。
-    风格要求：{voice_tone}，节奏利落，不做拼接感强的碎片化镜头，而是一个完整可发布的短视频成片。
+    请生成一条适合抖音信息流的纵向新闻观点视频，画幅 {aspect_ratio}。
+    风格要求：{voice_tone}，节奏利落，有现实感，不做花哨炫技，不要拼接感明显的廉价模板视频。
     内容主题：{title}
     核心新闻摘要：{summary}
     核心角度：{news['angle']}
@@ -227,7 +244,7 @@ def build_script_package(request: Dict[str, Any], patterns: List[Dict[str, Any]]
     镜头策略：{news['shot_strategy']}
     包装策略：{news['packaging_strategy']}
     分镜要求：
-    1. 开头 1 到 2 秒必须直接抛出最强冲突或最反常识的新闻切口。
+    1. 开头 1 秒必须直接抛出最强冲突或最反常识的新闻切口。
     2. 中段快速交代事件本身，再明确它为什么重要。
     3. 后段给出鲜明判断，而不是停留在新闻转述。
     4. 结尾留出一句明确结论和轻量 CTA。
@@ -252,16 +269,20 @@ def build_script_package(request: Dict[str, Any], patterns: List[Dict[str, Any]]
         'beats': beats,
         'shot_plan': shot_plan,
         'video_generation': {
-            'provider': 'volcengine',
+            'provider': 'volcengine_ark_seedance',
+        'model': 'doubao-seedance-1-5-pro-251215',
             'aspect_ratio': aspect_ratio,
             'duration_seconds': duration_seconds,
             'prompt': video_prompt,
             'negative_prompt': negative_prompt,
+            'reference_image_url': reference_image_url,
+            'camera_fixed': camera_fixed,
+            'watermark': watermark,
         },
         'notes': [
             'This package is grounded in repeated KB patterns, then adapted to the supplied news event.',
             'Use the generated prompt as the model input, but keep human review before publishing.',
-            'Video generation quality still depends on the provider model and the exact API template configured in ~/.openclaw/.env.',
+            'Ark image-to-video submission needs a reference image URL. Provide reference_image_url in request.json when submit_video=true.',
         ],
     }
 
@@ -297,6 +318,9 @@ def save_package(package: Dict[str, Any], creator_slug: str, title: str) -> Dict
         '## Angle',
         package['news']['angle'],
         '',
+        '## Reference Image URL',
+        package['video_generation'].get('reference_image_url') or '未提供',
+        '',
         '## Beats',
     ]
     for beat in package['beats']:
@@ -314,13 +338,17 @@ def save_package(package: Dict[str, Any], creator_slug: str, title: str) -> Dict
 def submit_to_volcengine(package: Dict[str, Any], output_dir: Path) -> Dict[str, Any]:
     client = VolcengineVideoClient()
     generation = package['video_generation']
+    reference_image_url = generation.get('reference_image_url')
+    if not reference_image_url:
+        raise VolcengineVideoError('Missing reference_image_url. Ark 图生视频 submission requires a reachable image URL.')
     request_context = {
         'prompt': generation['prompt'],
         'negative_prompt': generation.get('negative_prompt'),
         'aspect_ratio': generation.get('aspect_ratio'),
         'duration_seconds': generation.get('duration_seconds'),
-        'model': client.config.model,
-        'model_version': client.config.model_version,
+        'reference_image_url': reference_image_url,
+        'camera_fixed': generation.get('camera_fixed', False),
+        'watermark': generation.get('watermark', True),
         'package': package,
         'news': package.get('news'),
     }
