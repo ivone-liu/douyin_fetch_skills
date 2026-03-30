@@ -142,3 +142,10 @@ v3.1 的关键取舍是：
 - 直接把项目目录当作可运行工程
 - 把 Qdrant、Haystack、模型配置、ffmpeg 初始化收进安装流程
 - 数据库 schema 只提供，不自动执行
+
+
+## Python 3.9 说明
+
+- 默认只安装 `requirements.txt`，这是 Python 3.9 兼容线。
+- 如需本地 sentence-transformers 嵌入，再手动安装 `requirements.optional-local-embeddings.txt`。
+- 若使用 OpenClaw / OpenAI 兼容接口做 embedding，可不安装本地 transformers 栈。

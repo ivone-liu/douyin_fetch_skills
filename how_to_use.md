@@ -120,3 +120,10 @@ python scripts/validate_package.py
 ### 4）什么时候用 server 模式？
 
 当你需要一个常驻本机服务端，并且更接近生产运行形态时。
+
+
+## Python 3.9 说明
+
+- 默认只安装 `requirements.txt`，这是 Python 3.9 兼容线。
+- 如需本地 sentence-transformers 嵌入，再手动安装 `requirements.optional-local-embeddings.txt`。
+- 若使用 OpenClaw / OpenAI 兼容接口做 embedding，可不安装本地 transformers 栈。

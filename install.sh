@@ -303,3 +303,7 @@ main() {
 }
 
 main "$@"
+
+
+echo "[info] Python 3.9 默认不安装本地 sentence-transformers / transformers 栈。"
+echo "[info] 如需本地嵌入，请手动安装 requirements.optional-local-embeddings.txt"

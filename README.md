@@ -272,3 +272,10 @@ python scripts/validate_package.py
 - `how_to_use.md`：具体操作流程与命令示例
 - `Project.md`：设计说明与数据流
 - `docs/review-v3.1.md`：本轮 review 结果
+
+
+## Python 3.9 说明
+
+- 默认只安装 `requirements.txt`，这是 Python 3.9 兼容线。
+- 如需本地 sentence-transformers 嵌入，再手动安装 `requirements.optional-local-embeddings.txt`。
+- 若使用 OpenClaw / OpenAI 兼容接口做 embedding，可不安装本地 transformers 栈。
