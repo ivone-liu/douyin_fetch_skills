@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from common.storage import default_generated_script_dir, get_workspace_data_root, slugify
+from common.storage import default_generated_script_dir, slugify
 
 DEFAULT_QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
 DEFAULT_QDRANT_COLLECTION_PREFIX = os.getenv("HAYSTACK_QDRANT_COLLECTION_PREFIX", "douyin_creator")
@@ -18,19 +18,17 @@ JSON_BLOCK_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 
 @dataclass
 class RagConfig:
-    qdrant_mode: str = field(default_factory=lambda: os.getenv("HAYSTACK_QDRANT_MODE", "auto"))
-    qdrant_url: str = field(default_factory=lambda: os.getenv("QDRANT_URL", DEFAULT_QDRANT_URL))
-    qdrant_path: Optional[str] = field(default_factory=lambda: os.getenv("HAYSTACK_QDRANT_PATH"))
-    qdrant_api_key: Optional[str] = field(default_factory=lambda: os.getenv("QDRANT_API_KEY"))
-    collection_prefix: str = field(default_factory=lambda: os.getenv("HAYSTACK_QDRANT_COLLECTION_PREFIX", DEFAULT_QDRANT_COLLECTION_PREFIX))
-    embedding_backend: str = field(default_factory=lambda: os.getenv("HAYSTACK_EMBEDDER_BACKEND", "auto"))
-    local_embedding_model: str = field(default_factory=lambda: os.getenv("HAYSTACK_EMBEDDING_MODEL", DEFAULT_LOCAL_EMBEDDING_MODEL))
-    openai_api_key: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_API_KEY") or os.getenv("OPENCLAW_API_KEY"))
-    openai_api_base: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_API_BASE") or os.getenv("OPENCLAW_API_BASE") or os.getenv("OPENAI_BASE_URL"))
-    openai_embedding_model: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_EMBEDDING_MODEL") or os.getenv("OPENCLAW_EMBEDDING_MODEL"))
-    llm_api_key: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_API_KEY") or os.getenv("OPENCLAW_API_KEY"))
-    llm_api_base: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_API_BASE") or os.getenv("OPENCLAW_API_BASE") or os.getenv("OPENAI_BASE_URL"))
-    llm_model: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_MODEL") or os.getenv("OPENCLAW_MODEL") or os.getenv("MODEL"))
+    qdrant_url: str = DEFAULT_QDRANT_URL
+    qdrant_api_key: Optional[str] = os.getenv("QDRANT_API_KEY")
+    collection_prefix: str = DEFAULT_QDRANT_COLLECTION_PREFIX
+    embedding_backend: str = os.getenv("HAYSTACK_EMBEDDER_BACKEND", "auto")
+    local_embedding_model: str = DEFAULT_LOCAL_EMBEDDING_MODEL
+    openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY") or os.getenv("OPENCLAW_API_KEY")
+    openai_api_base: Optional[str] = os.getenv("OPENAI_API_BASE") or os.getenv("OPENCLAW_API_BASE") or os.getenv("OPENAI_BASE_URL")
+    openai_embedding_model: Optional[str] = os.getenv("OPENAI_EMBEDDING_MODEL") or os.getenv("OPENCLAW_EMBEDDING_MODEL")
+    llm_api_key: Optional[str] = os.getenv("OPENAI_API_KEY") or os.getenv("OPENCLAW_API_KEY")
+    llm_api_base: Optional[str] = os.getenv("OPENAI_API_BASE") or os.getenv("OPENCLAW_API_BASE") or os.getenv("OPENAI_BASE_URL")
+    llm_model: Optional[str] = os.getenv("OPENAI_MODEL") or os.getenv("OPENCLAW_MODEL") or os.getenv("MODEL")
 
     def resolved_embedding_backend(self) -> str:
         backend = (self.embedding_backend or "auto").strip().lower()
@@ -47,37 +45,6 @@ class RagConfig:
 
     def llm_available(self) -> bool:
         return bool(self.llm_api_key and self.llm_model)
-
-    def resolved_qdrant_mode(self) -> str:
-        mode = (self.qdrant_mode or "auto").strip().lower()
-        if mode in {"server", "local", "memory"}:
-            return mode
-        if self.qdrant_path:
-            return "local"
-        if self.qdrant_url and str(self.qdrant_url).strip():
-            return "server"
-        return "local"
-
-    def resolved_qdrant_location(self) -> str:
-        mode = self.resolved_qdrant_mode()
-        if mode == "memory":
-            return ":memory:"
-        if mode == "local":
-            raw = self.qdrant_path or str(get_workspace_data_root() / "qdrant_local")
-            path = Path(raw).expanduser().resolve()
-            path.mkdir(parents=True, exist_ok=True)
-            return str(path)
-        return (self.qdrant_url or DEFAULT_QDRANT_URL).strip() or DEFAULT_QDRANT_URL
-
-    def qdrant_manifest_meta(self) -> Dict[str, Any]:
-        mode = self.resolved_qdrant_mode()
-        location = self.resolved_qdrant_location()
-        meta: Dict[str, Any] = {"mode": mode}
-        if mode in {"local", "memory"}:
-            meta["location"] = location
-        else:
-            meta["url"] = location
-        return meta
 
 
 def _import_haystack_bits() -> Dict[str, Any]:
@@ -96,7 +63,7 @@ def _import_haystack_bits() -> Dict[str, Any]:
         from haystack_integrations.components.retrievers.qdrant import QdrantEmbeddingRetriever
     except Exception as exc:
         raise RuntimeError(
-            "Haystack/Qdrant 依赖缺失。请先执行 install.sh 或 pip install -r requirements.txt。"
+            "Haystack/Qdrant dependencies are missing. Run install.sh or pip install -r requirements.txt first."
         ) from exc
     return {
         "Document": Document,
@@ -258,19 +225,15 @@ def build_documents_from_markdown(md_path: Path) -> Tuple[List[Any], Dict[str, A
     docs: List[Any] = []
     for section_title, section_body in split_markdown_sections(text):
         for idx, chunk in enumerate(chunk_text(section_body), start=1):
-            docs.append(
-                Document(
-                    content=f"[{section_title}]\n{chunk}",
-                    meta={**common_meta, "section_title": section_title, "chunk_kind": "report_section", "chunk_index": idx},
-                )
-            )
+            docs.append(Document(
+                content=f"[{section_title}]\n{chunk}",
+                meta={**common_meta, "section_title": section_title, "chunk_kind": "report_section", "chunk_index": idx},
+            ))
     if structured:
-        docs.append(
-            Document(
-                content=build_structured_fact_text(structured),
-                meta={**common_meta, "section_title": "结构化事实", "chunk_kind": "structured_facts", "chunk_index": 1},
-            )
-        )
+        docs.append(Document(
+            content=build_structured_fact_text(structured),
+            meta={**common_meta, "section_title": "结构化事实", "chunk_kind": "structured_facts", "chunk_index": 1},
+        ))
     summary = {
         "video_id": video_id,
         "doc_count": len(docs),
@@ -298,17 +261,13 @@ def get_document_store(collection_name: str, embedding_dim: int, recreate: bool 
     cfg = config or RagConfig()
     bits = _import_haystack_bits()
     kwargs: Dict[str, Any] = {
+        "url": cfg.qdrant_url,
         "index": collection_name,
         "embedding_dim": embedding_dim,
         "recreate_index": recreate,
         "wait_result_from_api": True,
         "return_embedding": False,
     }
-    mode = cfg.resolved_qdrant_mode()
-    location = cfg.resolved_qdrant_location()
-    if mode in {"local", "memory"}:
-        return bits["QdrantDocumentStore"](location, **kwargs)
-    kwargs["url"] = location
     if cfg.qdrant_api_key:
         kwargs["api_key"] = bits["Secret"].from_token(cfg.qdrant_api_key)
     return bits["QdrantDocumentStore"](**kwargs)
@@ -350,13 +309,12 @@ def index_analysis_dir_to_qdrant(analysis_dir: Path, output_dir: Path, recreate:
     document_store = get_document_store(collection_name, embedding_dim=embedding_dim, recreate=recreate, config=cfg)
     document_store.write_documents(embedded_docs)
     output_dir.mkdir(parents=True, exist_ok=True)
-    qdrant_meta = cfg.qdrant_manifest_meta()
     manifest = {
-        "kb_version": "haystack_qdrant_v2",
+        "kb_version": "haystack_qdrant_v1",
         "creator_slug": creator_slug,
         "analysis_dir": str(analysis_dir),
         "qdrant": {
-            **qdrant_meta,
+            "url": cfg.qdrant_url,
             "collection_name": collection_name,
             "embedding_backend": backend,
             "embedding_model": model_name,
@@ -370,16 +328,11 @@ def index_analysis_dir_to_qdrant(analysis_dir: Path, output_dir: Path, recreate:
         "videos": video_summaries,
     }
     (output_dir / "knowledge-base.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    qdrant_lines = [f"- qdrant_mode: {qdrant_meta['mode']}"]
-    if qdrant_meta["mode"] in {"local", "memory"}:
-        qdrant_lines.append(f"- qdrant_location: {qdrant_meta['location']}")
-    else:
-        qdrant_lines.append(f"- qdrant_url: {qdrant_meta['url']}")
     overview_lines = [
         f"# {creator_slug} RAG Knowledge Base",
         "",
         "## Storage",
-        *qdrant_lines,
+        f"- qdrant_url: {cfg.qdrant_url}",
         f"- collection_name: {collection_name}",
         f"- embedding_backend: {backend}",
         f"- embedding_model: {model_name}",
@@ -406,9 +359,7 @@ def embed_query(text: str, config: Optional[RagConfig] = None) -> Tuple[List[flo
     return result["embedding"], model_name
 
 
-def retrieve_from_manifest(
-    manifest: Dict[str, Any], query: str, top_k: int = 8, filters: Optional[Dict[str, Any]] = None, config: Optional[RagConfig] = None
-) -> List[Dict[str, Any]]:
+def retrieve_from_manifest(manifest: Dict[str, Any], query: str, top_k: int = 8, filters: Optional[Dict[str, Any]] = None, config: Optional[RagConfig] = None) -> List[Dict[str, Any]]:
     cfg = config or RagConfig()
     bits = _import_haystack_bits()
     qdrant = manifest.get("qdrant") or {}
@@ -423,15 +374,13 @@ def retrieve_from_manifest(
     docs = result.get("documents") or result.get("document") or []
     out: List[Dict[str, Any]] = []
     for rank, doc in enumerate(docs, start=1):
-        out.append(
-            {
-                "rank": rank,
-                "content": getattr(doc, "content", ""),
-                "meta": getattr(doc, "meta", {}) or {},
-                "score": getattr(doc, "score", None),
-                "id": getattr(doc, "id", None),
-            }
-        )
+        out.append({
+            "rank": rank,
+            "content": getattr(doc, "content", ""),
+            "meta": getattr(doc, "meta", {}) or {},
+            "score": getattr(doc, "score", None),
+            "id": getattr(doc, "id", None),
+        })
     return out
 
 
@@ -440,10 +389,7 @@ def build_rag_context(retrieved_docs: List[Dict[str, Any]], max_chars: int = 600
     total = 0
     for item in retrieved_docs:
         meta = item.get("meta") or {}
-        header = (
-            f"[video_id={meta.get('video_id')} section={meta.get('section_title')} "
-            f"archetype={meta.get('content_archetype')} hook={meta.get('hook_type')}]"
-        )
+        header = f"[video_id={meta.get('video_id')} section={meta.get('section_title')} archetype={meta.get('content_archetype')} hook={meta.get('hook_type')}]"
         chunk = f"{header}\n{item.get('content', '').strip()}"
         total += len(chunk)
         if total > max_chars and parts:

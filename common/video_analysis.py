@@ -31,7 +31,7 @@ def ffprobe_json(path: Path) -> Dict[str, Any]:
         return {"available": False, "reason": str(exc)}
 
 
-def _parse_fraction(value: Optional[str]) -> Optional[float]:
+def _parse_fraction(value: str | None) -> Optional[float]:
     if not value:
         return None
     if "/" in value:

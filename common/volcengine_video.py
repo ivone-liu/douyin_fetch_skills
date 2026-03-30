@@ -10,25 +10,10 @@ import requests
 
 from .json_utils import first_non_empty_path
 
-
-def _env_int(*names: str, default: int) -> int:
-    for name in names:
-        raw = os.getenv(name)
-        if raw is None or str(raw).strip() == '':
-            continue
-        try:
-            return int(str(raw).strip())
-        except ValueError:
-            continue
-    return default
-
-
-DEFAULT_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
-ARK_BASE_URL = (os.getenv('VOLCENGINE_ARK_BASE_URL') or os.getenv('ARK_BASE_URL') or DEFAULT_ARK_BASE_URL).rstrip('/')
-ARK_SUBMIT_URL = f'{ARK_BASE_URL}/contents/generations/tasks'
-ARK_STATUS_URL_TEMPLATE = f'{ARK_BASE_URL}/contents/generations/tasks/{{task_id}}'
-ARK_MODEL = os.getenv('VOLCENGINE_VIDEO_MODEL') or os.getenv('ARK_MODEL') or 'doubao-seedance-1-5-pro-251215'
-ARK_MAX_DURATION_SECONDS = _env_int('VOLCENGINE_VIDEO_DURATION_SECONDS', 'ARK_MAX_DURATION_SECONDS', default=5)
+ARK_SUBMIT_URL = 'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks'
+ARK_STATUS_URL_TEMPLATE = 'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}'
+ARK_MODEL = 'doubao-seedance-1-5-pro-251215'
+ARK_MAX_DURATION_SECONDS = 5
 ARK_TASK_ID_PATHS = ['id', 'task_id', 'data.id', 'data.task_id']
 ARK_STATUS_PATHS = ['status', 'data.status']
 ARK_RESULT_URL_PATHS = [
@@ -66,9 +51,9 @@ class VolcengineVideoError(RuntimeError):
 
 
 def load_config_from_env() -> VolcengineVideoConfig:
-    api_key = (os.getenv('ARK_API_KEY') or os.getenv('VOLCENGINE_ARK_API_KEY') or '').strip()
+    api_key = os.getenv('ARK_API_KEY', '').strip()
     if not api_key:
-        raise VolcengineVideoError('Missing ARK_API_KEY or VOLCENGINE_ARK_API_KEY in environment.')
+        raise VolcengineVideoError('Missing ARK_API_KEY in environment.')
     return VolcengineVideoConfig(auth_value=f'Bearer {api_key}')
 
 
