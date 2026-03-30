@@ -82,7 +82,12 @@ def nested_get_first_url(obj: Any, preferred_keys: Iterable[str]) -> Optional[st
 
 
 def extract_music_meta(payload: Dict[str, Any]) -> Dict[str, Any]:
-    data = payload.get('data') or payload
+    data = payload.get('aweme_detail') if isinstance(payload.get('aweme_detail'), dict) else None
+    if data is None and isinstance(payload.get('data'), dict):
+        data_node = payload.get('data') or {}
+        data = data_node.get('aweme_detail') if isinstance(data_node.get('aweme_detail'), dict) else data_node
+    if data is None:
+        data = payload
     music = data.get('music') or {}
     play_url = nested_get_first_url(music, ['play_url', 'play_addr', 'url_list', 'uri'])
     return {
@@ -349,7 +354,7 @@ def upsert_mysql(ctx: PipelineContext, normalized: Dict[str, Any], music_meta: D
 def maybe_run_analysis(normalized_path: Path, mysql_dsn: Optional[str]) -> tuple[Optional[Path], str, Dict[str, Any]]:
     if not ANALYSIS_SCRIPT.exists():
         return None, 'pending', {'ok': False, 'reason': 'analysis_script_missing'}
-    cmd = [sys.executable, str(ANALYSIS_SCRIPT), str(normalized_path)]
+    cmd = [sys.executable, str(ANALYSIS_SCRIPT), '--normalized-json', str(normalized_path)]
     if mysql_dsn:
         cmd.extend(['--mysql-dsn', mysql_dsn])
     proc = subprocess.run(cmd, capture_output=True, text=True)

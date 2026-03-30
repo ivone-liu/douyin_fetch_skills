@@ -1,4 +1,4 @@
-# 抖音 Skills v3.1
+# 抖音 Skills v3.3
 
 这是一个面向 **OpenClaw / AgentSkills 兼容宿主** 的抖音内容工作流技能包。它把 **视频接入、博主订阅、资源查询、风格分析、知识库构建与检索、脚本生成、审核、视频渲染** 拆成了清晰阶段，并提供根技能与子技能两种入口。
 
@@ -53,7 +53,7 @@ bash install.sh
 
 这个脚本现在做的是“**整个项目依赖安装与初始化**”，不是 skill 挂载器。它会：
 
-- 检查 Python 是否 >= 3.9
+- 检查 Python 是否 >= 3.10
 - 创建 `.venv`
 - 安装 `requirements.txt`
 - 检查并尽量安装 `ffmpeg / ffprobe`
@@ -72,19 +72,19 @@ bash install.sh --help
 #### 本地落盘 Qdrant（推荐开发用）
 
 ```bash
-bash install.sh --qdrant-mode local
+QDRANT_MODE=local bash install.sh
 ```
 
 #### 内存模式（只适合测试）
 
 ```bash
-bash install.sh --qdrant-mode memory
+QDRANT_MODE=server bash install.sh
 ```
 
 #### 本机 Docker 启动 Qdrant 服务端
 
 ```bash
-bash install.sh --qdrant-mode server
+QDRANT_MODE=memory bash install.sh
 ```
 
 #### 跳过 Python 依赖安装，只初始化目录和配置
@@ -103,7 +103,7 @@ bash install.sh --skip-system-deps
 
 ## 四、运行环境
 
-- Python >= 3.9
+- Python >= 3.10
 - MySQL 5.7+（可选，用于媒体与任务落库）
 - Haystack + Qdrant（推荐本地模式）
 - OpenClaw 的 OpenAI 兼容模型端点，或标准 OpenAI 兼容端点
@@ -122,6 +122,16 @@ bash install.sh --skip-system-deps
 数据库由你自己控制。
 
 ---
+
+### 4）为什么 v3.3 直接要求 Python 3.10+
+
+这版切到了 Haystack / Qdrant 的主线版本，不再维持 Python 3.9 的冻结兼容线。
+
+- Haystack 从 2.22.0 开始要求 Python 3.10+
+- qdrant-haystack 当前主线也要求 Python 3.10+
+- qdrant-client 当前主线同样要求 Python 3.10+
+
+如果你坚持 Python 3.9，就不能使用这份 v3.3 包。
 
 ## 五、`~/.openclaw/.env` 完整配置说明
 
@@ -219,7 +229,7 @@ OPENCLAW_EMBEDDING_MODEL=your-embedding-model
 安装：
 
 ```bash
-bash install.sh --qdrant-mode local
+QDRANT_MODE=local bash install.sh
 ```
 
 ### 方案 2：本机 Docker Qdrant 服务端
@@ -230,13 +240,13 @@ bash install.sh --qdrant-mode local
 安装：
 
 ```bash
-bash install.sh --qdrant-mode server
+QDRANT_MODE=memory bash install.sh
 ```
 
 ### 方案 3：只跑测试
 
 ```bash
-bash install.sh --qdrant-mode memory --skip-system-deps
+QDRANT_MODE=server bash install.sh --skip-system-deps
 ```
 
 ---
@@ -271,4 +281,4 @@ python scripts/validate_package.py
 
 - `how_to_use.md`：具体操作流程与命令示例
 - `Project.md`：设计说明与数据流
-- `docs/review-v3.1.md`：本轮 review 结果
+- `docs/review-v3.3.md`：本轮 review 结果

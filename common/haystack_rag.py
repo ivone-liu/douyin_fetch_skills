@@ -36,7 +36,7 @@ class RagConfig:
         backend = (self.embedding_backend or "auto").strip().lower()
         if backend in {"openai", "sentence_transformers"}:
             return backend
-        if self.openai_api_key and self.openai_embedding_model:
+        if self.openai_embedding_model and (self.openai_api_base or self.openai_api_key or os.getenv("OPENCLAW_ALLOW_EMPTY_API_KEY", "1") == "1"):
             return "openai"
         return "sentence_transformers"
 
@@ -46,7 +46,7 @@ class RagConfig:
         return self.local_embedding_model
 
     def llm_available(self) -> bool:
-        return bool(self.llm_api_key and self.llm_model)
+        return bool(self.llm_model and (self.llm_api_base or self.llm_api_key or os.getenv("OPENCLAW_ALLOW_EMPTY_API_KEY", "1") == "1"))
 
     def resolved_qdrant_mode(self) -> str:
         mode = (self.qdrant_mode or "auto").strip().lower()
@@ -319,7 +319,8 @@ def get_embedders(config: Optional[RagConfig] = None):
     bits = _import_haystack_bits()
     backend = cfg.resolved_embedding_backend()
     if backend == "openai":
-        secret = bits["Secret"].from_token(cfg.openai_api_key or "")
+        token = cfg.openai_api_key or os.getenv("OPENCLAW_DUMMY_API_KEY", "not-needed")
+        secret = bits["Secret"].from_token(token)
         common: Dict[str, Any] = {"api_key": secret, "model": cfg.embedding_model_name()}
         if cfg.openai_api_base:
             common["api_base_url"] = cfg.openai_api_base
@@ -455,9 +456,10 @@ def build_rag_context(retrieved_docs: List[Dict[str, Any]], max_chars: int = 600
 def call_llm_json(system_prompt: str, user_prompt: str, config: Optional[RagConfig] = None) -> Dict[str, Any]:
     cfg = config or RagConfig()
     if not cfg.llm_available():
-        raise RuntimeError("LLM configuration missing. Set OPENAI_API_KEY/OPENAI_MODEL or OPENCLAW_API_KEY/OPENCLAW_MODEL.")
+        raise RuntimeError("LLM configuration missing. Set OPENAI_MODEL/OPENAI_API_BASE or OPENCLAW_MODEL/OPENCLAW_API_BASE; API key may be omitted for no-auth compatible gateways.")
     bits = _import_haystack_bits()
-    secret = bits["Secret"].from_token(cfg.llm_api_key or "")
+    token = cfg.llm_api_key or os.getenv("OPENCLAW_DUMMY_API_KEY", "not-needed")
+    secret = bits["Secret"].from_token(token)
     kwargs: Dict[str, Any] = {"api_key": secret, "model": cfg.llm_model}
     if cfg.llm_api_base:
         kwargs["api_base_url"] = cfg.llm_api_base

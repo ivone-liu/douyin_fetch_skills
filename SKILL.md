@@ -17,7 +17,7 @@ metadata:
     - dy-kb
     - dy-review
 ---
-# 抖音 Skills v3.1
+# 抖音 Skills v3.3
 
 这个根技能的作用，不是替代 `skills/` 里的子技能，而是确保在“只识别根目录技能”的宿主里，这个包也能被识别和激活。
 

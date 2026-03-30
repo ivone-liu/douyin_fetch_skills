@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PKG_ROOT="$ROOT_DIR"
 VENV_DIR="${ROOT_DIR}/.venv"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 SKIP_FFMPEG="${SKIP_FFMPEG:-0}"
@@ -18,19 +17,58 @@ QDRANT_URL="${QDRANT_URL:-http://127.0.0.1:${QDRANT_HTTP_PORT}}"
 ENV_FILE="${ENV_FILE:-$HOME/.openclaw/.env}"
 DATA_ROOT="${OPENCLAW_WORKSPACE_DATA_ROOT:-$HOME/.openclaw/workspace/data}"
 
-log() {
-  printf '\n[%s] %s\n' "setup" "$1"
+log() { printf '\n[%s] %s\n' "setup" "$1"; }
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+usage() {
+  cat <<MSG
+用法：
+  bash install.sh [选项]
+
+选项：
+  --python PATH              指定 Python 可执行文件，默认 python3
+  --qdrant-mode MODE         server | local | memory，默认 server
+  --skip-python-deps         跳过 pip 依赖安装
+  --skip-system-deps         跳过 ffmpeg/ffprobe 安装
+  --skip-venv                跳过创建 .venv
+  --skip-qdrant              跳过 Qdrant 启动/初始化
+  -h, --help                 显示帮助
+
+也支持通过环境变量控制：
+  PYTHON_BIN, QDRANT_MODE, SKIP_PIP, SKIP_FFMPEG, SKIP_VENV, SKIP_QDRANT,
+  QDRANT_CONTAINER_NAME, QDRANT_HTTP_PORT, QDRANT_GRPC_PORT, QDRANT_STORAGE_DIR,
+  QDRANT_URL, ENV_FILE, OPENCLAW_WORKSPACE_DATA_ROOT
+MSG
 }
 
-have_cmd() {
-  command -v "$1" >/dev/null 2>&1
-}
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --python)
+      PYTHON_BIN="$2"; shift 2 ;;
+    --qdrant-mode)
+      QDRANT_MODE="$2"; shift 2 ;;
+    --skip-python-deps)
+      SKIP_PIP=1; shift ;;
+    --skip-system-deps)
+      SKIP_FFMPEG=1; shift ;;
+    --skip-venv)
+      SKIP_VENV=1; shift ;;
+    --skip-qdrant)
+      SKIP_QDRANT=1; shift ;;
+    -h|--help)
+      usage; exit 0 ;;
+    *)
+      echo "未知参数: $1" >&2
+      usage
+      exit 2 ;;
+  esac
+done
 
-require_python39() {
+require_python310() {
   "$PYTHON_BIN" - <<'PY'
 import sys
-if sys.version_info < (3, 9):
-    raise SystemExit(f"需要 Python >= 3.9，当前: {sys.version.split()[0]}")
+if sys.version_info < (3, 10):
+    raise SystemExit(f"需要 Python >= 3.10，当前: {sys.version.split()[0]}")
 PY
 }
 
@@ -77,96 +115,81 @@ install_ffmpeg() {
     log "ffmpeg / ffprobe already installed"
     return 0
   fi
-
   if [[ "$SKIP_FFMPEG" == "1" ]]; then
-    log "SKIP_FFMPEG=1, skipping ffmpeg installation"
+    log "跳过系统依赖安装（SKIP_FFMPEG=1）"
     return 0
   fi
-
   local sudo_cmd=""
   if [[ "$(id -u)" -ne 0 ]] && have_cmd sudo; then
     sudo_cmd="sudo"
   fi
-
   if have_cmd apt-get; then
-    log "Installing ffmpeg via apt-get"
+    log "通过 apt-get 安装 ffmpeg"
     $sudo_cmd apt-get update
     $sudo_cmd apt-get install -y ffmpeg
   elif have_cmd brew; then
-    log "Installing ffmpeg via Homebrew"
+    log "通过 Homebrew 安装 ffmpeg"
     brew install ffmpeg
   else
-    log "Could not auto-install ffmpeg. Please install ffmpeg and ffprobe manually."
+    log "未找到 apt-get/brew，无法自动安装 ffmpeg，请手动安装 ffmpeg 和 ffprobe。"
     return 1
   fi
 }
 
 ensure_qdrant() {
   local mode="${QDRANT_MODE,,}"
-
   if [[ "$SKIP_QDRANT" == "1" ]]; then
-    log "SKIP_QDRANT=1, skipping Qdrant setup"
+    log "跳过 Qdrant 初始化（SKIP_QDRANT=1）"
     return 0
   fi
-
   case "$mode" in
     memory)
-      log "Qdrant mode=memory: no external installation required"
+      log "Qdrant mode=memory：不启动外部服务"
       upsert_env HAYSTACK_QDRANT_MODE memory
-      return 0
       ;;
     local)
-      log "Qdrant mode=local: using embedded local persisted storage"
+      log "Qdrant mode=local：使用本地持久化目录"
       mkdir -p "$DATA_ROOT/qdrant_local"
       upsert_env HAYSTACK_QDRANT_MODE local
       upsert_env HAYSTACK_QDRANT_PATH "$DATA_ROOT/qdrant_local"
-      return 0
       ;;
     server)
+      if ! have_cmd docker; then
+        log "未发现 Docker。请安装 Docker，或改用 QDRANT_MODE=local。"
+        return 1
+      fi
+      mkdir -p "$QDRANT_STORAGE_DIR"
+      if docker ps --format '{{.Names}}' | grep -q "^${QDRANT_CONTAINER_NAME}$"; then
+        log "Qdrant 容器已在运行: ${QDRANT_CONTAINER_NAME}"
+      elif docker ps -a --format '{{.Names}}' | grep -q "^${QDRANT_CONTAINER_NAME}$"; then
+        log "启动现有 Qdrant 容器: ${QDRANT_CONTAINER_NAME}"
+        docker start "$QDRANT_CONTAINER_NAME" >/dev/null
+      else
+        log "拉取并启动 Qdrant Docker 容器"
+        docker pull qdrant/qdrant
+        docker run -d \
+          --name "$QDRANT_CONTAINER_NAME" \
+          -p "${QDRANT_HTTP_PORT}:6333" \
+          -p "${QDRANT_GRPC_PORT}:6334" \
+          -v "${QDRANT_STORAGE_DIR}:/qdrant/storage:z" \
+          qdrant/qdrant >/dev/null
+      fi
+      upsert_env HAYSTACK_QDRANT_MODE server
+      upsert_env QDRANT_URL "$QDRANT_URL"
+      log "检查 Qdrant 健康状态: ${QDRANT_URL}"
+      "$PYTHON_BIN" - <<PY
+import json, urllib.request
+url='${QDRANT_URL}/collections'
+with urllib.request.urlopen(url, timeout=15) as resp:
+    payload=json.loads(resp.read().decode('utf-8'))
+print(json.dumps({'qdrant_ok': True, 'url': url, 'status': payload.get('status')}, ensure_ascii=False))
+PY
       ;;
     *)
-      echo "Unsupported QDRANT_MODE: $mode" >&2
+      echo "不支持的 QDRANT_MODE: $mode" >&2
       return 1
       ;;
   esac
-
-  if ! have_cmd docker; then
-    log "Docker not found. Install Docker and rerun, or set QDRANT_MODE=local"
-    return 1
-  fi
-
-  mkdir -p "$QDRANT_STORAGE_DIR"
-
-  if docker ps --format '{{.Names}}' | grep -q "^${QDRANT_CONTAINER_NAME}$"; then
-    log "Qdrant container already running: ${QDRANT_CONTAINER_NAME}"
-  elif docker ps -a --format '{{.Names}}' | grep -q "^${QDRANT_CONTAINER_NAME}$"; then
-    log "Starting existing Qdrant container: ${QDRANT_CONTAINER_NAME}"
-    docker start "$QDRANT_CONTAINER_NAME" >/dev/null
-  else
-    log "Pulling and starting Qdrant docker container"
-    docker pull qdrant/qdrant
-    docker run -d \
-      --name "$QDRANT_CONTAINER_NAME" \
-      -p "${QDRANT_HTTP_PORT}:6333" \
-      -p "${QDRANT_GRPC_PORT}:6334" \
-      -v "${QDRANT_STORAGE_DIR}:/qdrant/storage:z" \
-      qdrant/qdrant >/dev/null
-  fi
-
-  upsert_env HAYSTACK_QDRANT_MODE server
-  upsert_env QDRANT_URL "$QDRANT_URL"
-
-  log "Checking Qdrant health at ${QDRANT_URL}"
-  python - <<PY
-import json, urllib.request
-url = '${QDRANT_URL}/collections'
-try:
-    with urllib.request.urlopen(url, timeout=10) as resp:
-        payload = json.loads(resp.read().decode('utf-8'))
-    print(json.dumps({'qdrant_ok': True, 'url': url, 'status': payload.get('status')}, ensure_ascii=False))
-except Exception as exc:
-    print(json.dumps({'qdrant_ok': False, 'url': url, 'error': str(exc)}, ensure_ascii=False))
-PY
 }
 
 ensure_data_dirs() {
@@ -183,14 +206,13 @@ ensure_data_dirs() {
 
 install_python_env() {
   if [[ "$SKIP_VENV" != "1" ]]; then
-    log "Creating virtual environment at ${VENV_DIR}"
+    log "创建虚拟环境: ${VENV_DIR}"
     "$PYTHON_BIN" -m venv "$VENV_DIR"
     # shellcheck disable=SC1090
     source "${VENV_DIR}/bin/activate"
   fi
-
   if [[ "$SKIP_PIP" != "1" ]]; then
-    log "Installing Python dependencies"
+    log "安装 Python 依赖"
     python -m pip install --upgrade pip setuptools wheel
     python -m pip install -r "${ROOT_DIR}/requirements.txt"
   fi
@@ -198,47 +220,40 @@ install_python_env() {
 
 main() {
   log "Project root: ${ROOT_DIR}"
-
   if ! have_cmd "$PYTHON_BIN"; then
     echo "Python not found: ${PYTHON_BIN}" >&2
     exit 1
   fi
-
-  require_python39
+  require_python310
   ensure_env_file
   ensure_data_dirs
   install_python_env
   install_ffmpeg || true
   ensure_qdrant || true
-
-  log "Validating core commands"
+  log "核心命令检查"
   python --version
   if have_cmd ffmpeg; then ffmpeg -version | head -n 1; else echo "ffmpeg: missing"; fi
   if have_cmd ffprobe; then ffprobe -version | head -n 1; else echo "ffprobe: missing"; fi
-
   cat <<MSG
 
-Install complete.
+安装完成。
 
-Next steps:
-1. Edit env file if needed:
+下一步：
+1. 按需编辑 env 文件：
    ${ENV_FILE}
 
-2. Optional core variables:
+2. 常用配置：
    TIKHUB_API_TOKEN=your_tikhub_token
    MYSQL_DSN=mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4
    QDRANT_URL=${QDRANT_URL}
+   OPENCLAW_API_BASE=http://127.0.0.1:11434/v1
+   OPENCLAW_MODEL=your-chat-model
+   OPENCLAW_EMBEDDING_MODEL=your-embedding-model
 
-3. Optional if you want Haystack to use your OpenClaw-compatible embedding/LLM endpoint instead of local sentence-transformers:
-   OPENAI_API_KEY=your_openclaw_or_openai_key
-   OPENAI_API_BASE=your_openclaw_compatible_base_url
-   OPENAI_MODEL=your_openclaw_chat_model
-   OPENAI_EMBEDDING_MODEL=your_openclaw_embedding_model
-
-4. MySQL schema is still manual on purpose:
+3. MySQL schema 仍然手动导入：
    mysql -h 127.0.0.1 -u <user> -p <database> < "${ROOT_DIR}/db/douyin_media_schema.sql"
 
-5. Validate package:
+4. 包体校验：
    python "${ROOT_DIR}/scripts/validate_package.py"
 
 MSG

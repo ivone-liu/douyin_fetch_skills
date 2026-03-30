@@ -1,4 +1,4 @@
-# 如何使用抖音 Skills v3.1
+# 如何使用抖音 Skills v3.3
 
 这份文档只讲怎么用，不重复讲项目背景。环境变量的完整说明和安装参数说明，请优先看根目录 `README.md`。
 
@@ -7,7 +7,7 @@
 推荐先执行：
 
 ```bash
-bash install.sh --qdrant-mode local
+QDRANT_MODE=local bash install.sh
 ```
 
 然后激活虚拟环境：
@@ -19,13 +19,13 @@ source .venv/bin/activate
 如果你要使用 Docker 跑本机 Qdrant 服务端：
 
 ```bash
-bash install.sh --qdrant-mode server
+QDRANT_MODE=memory bash install.sh
 ```
 
 如果你只是本地快速验证：
 
 ```bash
-bash install.sh --qdrant-mode memory --skip-system-deps
+QDRANT_MODE=server bash install.sh --skip-system-deps
 ```
 
 ## 二、常见入口
@@ -92,7 +92,7 @@ python scripts/validate_package.py
 
 建议你第一次跑按这个顺序来：
 
-1. `bash install.sh --qdrant-mode local`
+1. `QDRANT_MODE=local bash install.sh`
 2. `source .venv/bin/activate`
 3. `python scripts/validate_package.py`
 4. `python tools/fetch-single-video-payload/scripts/run.py ...`
@@ -105,7 +105,7 @@ python scripts/validate_package.py
 
 ### 1）为什么 install.sh 不再负责 workspace 挂载？
 
-因为 v3.1 开始，`install.sh` 只负责“项目依赖安装与运行初始化”。
+因为 v3.3 开始，`install.sh` 只负责“项目依赖安装与运行初始化”。
 这个包本身就是完整项目目录，不再需要通过 `install.sh` 去做 symlink/copy 挂载。
 
 ### 2）install.sh 会不会动 MySQL？
