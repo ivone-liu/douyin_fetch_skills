@@ -1,6 +1,11 @@
 pymysql>=1.1.0
 requests>=2.31.0
 python-dotenv>=1.0.1
-# Optional but recommended for richer media analysis:
-# opencv-python>=4.10.0.84
-# librosa>=0.10.2
+# Haystack 2.x + Qdrant integration, tuned for Python 3.9 compatibility
+haystack-ai>=2.25.2,<3.0.0
+qdrant-haystack>=10.2.1,<11.0.0
+qdrant-client>=1.11.0,<2.0.0
+# Pin transformers stack to a Python 3.9-safe line for local embeddings
+sentence-transformers>=2.7.0,<3.0.0
+transformers>=4.39.3,<4.40.0
+openai>=1.40.0,<2.0.0
