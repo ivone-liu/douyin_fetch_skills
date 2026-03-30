@@ -1,0 +1,10 @@
+{
+  "creator_slug": "demo_creator",
+  "title": "养老行业出现了一个被低估的信号",
+  "summary": "这里放新闻摘要或脚本摘要。",
+  "reference_image_url": "https://example.com/reference-image.jpg",
+  "duration_seconds": 5,
+  "watermark": true,
+  "camera_fixed": false,
+  "negative_prompt": "低清晰度，字幕乱码，肢体异常"
+}

@@ -1,0 +1,4 @@
+# Optional local embedding stack.
+# Recommended only if your environment can satisfy these deps.
+sentence-transformers>=2.7.0,<3.0.0
+transformers>=4.39.3,<4.40.0

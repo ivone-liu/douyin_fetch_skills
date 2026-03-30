@@ -1,812 +1,296 @@
-# OpenClaw Douyin Skills Pack
+# 抖音 Skills v3.1
 
-这是一套面向 **OpenClaw** 的抖音工作流 skill 包，围绕 **TikHub** 提供的数据接口设计。它的目标不是只拿到一份接口返回，而是把“抓取、保存、下载、分析、复用”做成一条能持续运行的本地流水线。
+这是一个面向 **OpenClaw / AgentSkills 兼容宿主** 的抖音内容工作流技能包。它把 **视频接入、博主订阅、资源查询、风格分析、知识库构建与检索、脚本生成、审核、视频渲染** 拆成了清晰阶段，并提供根技能与子技能两种入口。
 
-这套项目适合做四类事情：
+这份 README 重点讲三件事：
 
-- 订阅抖音账号，并记录订阅方式与同步策略
-- 抓取单条视频或整号视频
-- 下载视频和音乐素材，并生成本地分析文档
-- 基于本地分析文档构建知识库，再生成热门视频脚本
+1. 这个项目是什么
+2. 整个项目的依赖如何安装
+3. `~/.openclaw/.env` 应该怎么配
 
-## 项目包含的 skill
+更细的操作步骤请看根目录 `how_to_use.md`。
 
-当前包含 6 个 skill：
+---
 
-1. `douyin-subscription-manager`
-2. `douyin-video-harvester`
-3. `douyin-shot-analysis-kb`
-4. `douyin-hot-video-script-generator`
-5. `douyin-single-video-fetcher`
-6. `douyin-news-video-director`
+## 一、这是什么
 
-这 6 个 skill 不是并列重复关系，而是一条链路上的不同环节。
+这套包适合以下场景：
 
-## 这套项目解决什么问题
+- 解析单条抖音视频并落地到本地资产库
+- 通过单条视频反查博主并建立订阅/同步
+- 对本地视频做结构化风格分析
+- 用 **Haystack + 本地/本机 Qdrant** 构建或查询风格知识库
+- 使用 **OpenClaw 提供的 OpenAI 兼容基座模型** 做 RAG 问答、脚本生成、脚本改写
+- 提交火山引擎视频生成任务并管理结果
 
-只调用 TikHub 的单个接口，通常只能拿到“元数据”或者“作品详情”。这不够。你真正需要的是：
+---
 
-- 原始响应留痕，方便回查和补解析
-- 高价值字段进入数据库，方便索引、状态管理、去重和调度
-- 下载的视频和音乐按博主分组保存，避免后续混乱
-- 每条视频生成一份本地 Markdown 分析文档，并在文档内嵌入结构化 JSON 分析块，作为后续知识库和脚本生成的主要输入
+## 二、目录说明
 
-所以这套项目采用的是下面这条固定链路：
+- `SKILL.md`：根技能，兼容只识别根目录技能的宿主
+- `README.md`：给人看的总览、依赖安装、配置说明
+- `how_to_use.md`：给人看的操作手册，侧重流程与示例
+- `Project.md`：设计文档、边界与数据流说明
+- `skills/`：面向用户或流程调度的技能入口
+- `tools/`：确定性 Python 工具层
+- `scripts/`：当前版本的原生实现脚本目录，包含接入、分析、建库、检索、脚本生成、新闻脚本包生成等实现
+- `common/`：共享运行时库
+- `db/`：MySQL schema（只提供 SQL，不由安装脚本执行）
+- `docs/`：架构与 review 文档
+- `references/`：给 AI 读取的参考资料
 
-**TikHub 接口返回 → 本地原始 JSON → 标准化 JSON → MySQL 索引 → 本地下载 → 每条视频一份 Markdown → 基于 Markdown 做知识库和脚本生成**
+---
 
-## 目录结构
+## 三、安装方式
 
-项目目录结构如下：
+### 1）推荐方式
 
-```text
-openclaw-douyin-skills/
-  README.md
-  requirements.txt
-  install.sh
-  db/
-    douyin_media_schema.sql
-  data/
-    creators/
-      <creator-slug>/
-        raw_api/
-          douyin_single_video/
-            <yyyy-mm-dd>/
-              <aweme_id>.json
-        normalized/
-          douyin_single_video/
-            <aweme_id>.json
-        downloads/
-          videos/
-            <aweme_id>.<ext>
-          music/
-            <music-key>.<ext>
-        analysis_md/
-          <aweme_id>.md
-  douyin-subscription-manager/
-    SKILL.md
-    references/
-  douyin-video-harvester/
-    SKILL.md
-    references/
-    scripts/
-  douyin-shot-analysis-kb/
-    SKILL.md
-    references/
-    scripts/
-  douyin-hot-video-script-generator/
-    SKILL.md
-    references/
-    scripts/
-  douyin-single-video-fetcher/
-    SKILL.md
-    references/
-    scripts/
-```
-
-## 数据存在哪里
-
-这套项目的数据根目录固定在 OpenClaw workspace 下，不依赖 repo 内部目录。
-
-所有本地数据都放在：
-
-```text
-~/.openclaw/workspace/data/
-```
-
-其中每个博主一个子目录：
-
-```text
-~/.openclaw/workspace/data/creators/<creator-slug>/
-```
-
-这个约定是项目的一部分，不需要你再单独配置一个 `DOUYIN_STORAGE_ROOT`。这样做的目的很直接：
-
-- 一个博主的数据不会和另一个博主混在一起
-- 迁移、备份、删除某个博主的数据更容易
-- 后续知识库和脚本生成天然按博主维度处理
-- 项目在不同机器上更稳定，不容易出现“文档说一套、实际路径又是另一套”
-
-### 每个博主目录下的数据分层
-
-#### 1. `raw_api/`
-保存 TikHub 原始响应。
-
-示例：
-
-```text
-~/.openclaw/workspace/data/creators/techoldman/raw_api/douyin_single_video/2026-03-22/7448118827402972455.json
-```
-
-用途：
-
-- 审计
-- 回放
-- 字段补提取
-- 排查解析问题
-
-#### 2. `normalized/`
-保存标准化后的结构化 JSON。
-
-示例：
-
-```text
-~/.openclaw/workspace/data/creators/techoldman/normalized/douyin_single_video/7448118827402972455.json
-```
-
-用途：
-
-- 统一字段命名
-- 减少后续脚本重复解析原始响应
-- 为数据库写入和后续分析提供稳定结构
-
-#### 3. `downloads/videos/`
-保存视频文件。
-
-示例：
-
-```text
-~/.openclaw/workspace/data/creators/techoldman/downloads/videos/7448118827402972455.mp4
-```
-
-#### 4. `downloads/music/`
-保存音乐文件。
-
-示例：
-
-```text
-~/.openclaw/workspace/data/creators/techoldman/downloads/music/1234567890.mp3
-```
-
-#### 5. `analysis_md/`
-每条视频生成一份 Markdown 分析文档。文档内包含人可读说明和一个结构化 JSON 分析块。
-
-示例：
-
-```text
-~/.openclaw/workspace/data/creators/techoldman/analysis_md/7448118827402972455.md
-```
-
-用途：
-
-- 人可读
-- 模型可读
-- 作为知识库构建和脚本生成的主输入
-
-后续如果要做内容分析、知识库总结、脚本生成，**优先读本地 MD，不优先读原始 JSON**。
-
-## MySQL 里存什么
-
-MySQL 只保存高价值索引字段和状态信息，不保存整坨原始接口响应。
-
-这样设计的原因是：
-
-- 原始响应应该保留在本地文件中，方便完整追溯
-- 数据库更适合存索引、路径、状态、去重字段和关系映射
-
-数据库建表文件在：
-
-```text
-db/douyin_media_schema.sql
-```
-
-包含这些表：
-
-### `creators`
-保存博主信息。
-
-主要字段包括：
-
-- `sec_user_id`
-- `unique_id`
-- `display_name`
-- `avatar_url`
-- `signature`
-
-### `videos`
-保存视频主记录。
-
-主要字段包括：
-
-- `aweme_id`
-- `creator_id`
-- `desc_text`
-- `create_time`
-- `duration_ms`
-- `play_url`
-- `raw_json_path`
-- `normalized_json_path`
-- `local_video_path`
-- `local_analysis_md_path`
-- `download_status`
-- `analysis_status`
-
-### `music_assets`
-保存音乐素材信息。
-
-主要字段包括：
-
-- `music_id`
-- `title`
-- `author_name`
-- `play_url`
-- `local_music_path`
-- `download_status`
-
-### `video_music_map`
-保存视频和音乐的关系映射。
-
-### `api_fetch_logs`
-保存接口抓取日志。
-
-主要用于记录：
-
-- 来源类型
-- 来源输入
-- 接口名
-- 请求参数
-- 响应码
-- 原始 JSON 路径
-- 关联 `aweme_id`
-
-## 运行依赖
-
-### 必要依赖
-
-这些不装，项目跑不起来：
-
-- Python 3.10+
-- MySQL 8.0+ 或兼容版本
-- `pymysql`
-- `requests`
-- `ffmpeg`
-- `ffprobe`
-
-它们分别负责：
-
-- `pymysql`：写入和更新 MySQL
-- `requests`：调用接口、下载资源
-- `ffmpeg` / `ffprobe`：读取媒体信息、提取基础音视频信息、为分析准备素材
-
-### 推荐依赖
-
-这些不是最低运行要求，但建议安装：
-
-- `python-dotenv`
-- `opencv-python`
-- `librosa`
-
-它们分别用于：
-
-- `python-dotenv`：更方便管理环境变量
-- `opencv-python`：后续扩展镜头切换、画面变化频率分析
-- `librosa`：后续扩展音乐节奏、BPM、踩点分析
-
-## 安装
-
-### 1. 解压项目
-
-把 zip 解压到本地目录，例如：
+直接在项目根目录执行：
 
 ```bash
-unzip openclaw-douyin-skills-v7.zip
-cd openclaw-douyin-skills
+bash install.sh
 ```
 
-### 2. 一键安装依赖
+这个脚本现在做的是“**整个项目依赖安装与初始化**”，不是 skill 挂载器。它会：
 
-项目根目录提供了一键安装脚本：
-
-```bash
-bash ./install.sh
-```
-
-这个脚本会：
-
+- 检查 Python 是否 >= 3.9
 - 创建 `.venv`
 - 安装 `requirements.txt`
-- 尝试自动安装 `ffmpeg`
-- 输出数据库初始化命令
-- 输出单视频测试命令
+- 检查并尽量安装 `ffmpeg / ffprobe`
+- 准备 `~/.openclaw/.env`
+- 准备本地数据目录
+- 根据配置初始化 Qdrant。默认会按 `server` 模式通过 Docker 拉起本机 Qdrant；你也可以切到 `local` / `memory`。
 
-#### 可选参数
-
-跳过自动安装 ffmpeg：
-
-```bash
-SKIP_FFMPEG=1 bash ./install.sh
-```
-
-跳过创建虚拟环境：
+### 2）常见参数
 
 ```bash
-SKIP_VENV=1 bash ./install.sh
+bash install.sh --help
 ```
 
-跳过 Python 依赖安装：
+常用示例：
+
+#### 本机 Docker 安装并启动 Qdrant（默认推荐）
 
 ```bash
-SKIP_PIP=1 bash ./install.sh
+bash install.sh --qdrant-mode memory
 ```
 
-### 3. 设置环境变量
-
-至少需要两个环境变量：
+#### 本地落盘 Qdrant（不依赖 Qdrant 服务端）
 
 ```bash
-export TIKHUB_API_TOKEN='your_tikhub_token'
-export MYSQL_DSN='mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4'
+bash install.sh --qdrant-mode local
 ```
 
-说明：
-
-- `TIKHUB_API_TOKEN` 用于访问 TikHub API
-- `MYSQL_DSN` 用于连接 MySQL
-
-### 4. 初始化数据库
-
-执行：
+#### 内存模式（只适合测试）
 
 ```bash
-mysql -h 127.0.0.1 -u <user> -p <database> < ./db/douyin_media_schema.sql
+bash install.sh --qdrant-mode server
 ```
 
-注意，这个 SQL 文件内部已经包含：
-
-```sql
-CREATE DATABASE IF NOT EXISTS openclaw_douyin;
-USE openclaw_douyin;
-```
-
-所以实际执行时，你也可以直接：
+#### 跳过 Python 依赖安装，只初始化目录和配置
 
 ```bash
-mysql -h 127.0.0.1 -u <user> -p < ./db/douyin_media_schema.sql
+bash install.sh --skip-python-deps
 ```
 
-## 在 OpenClaw 中安装 skill
-
-如果你要把这套项目接到 OpenClaw 使用，推荐把整个项目放到 OpenClaw 的 skill 目录中。
-
-常见方式：
-
-### 方式一：当前 workspace 专用
-
-```text
-<workspace>/skills/openclaw-douyin-skills/
-```
-
-### 方式二：当前用户全局可用
-
-```text
-~/.openclaw/skills/openclaw-douyin-skills/
-```
-
-然后在 OpenClaw 配置中给相关 skill 注入环境变量，例如：
-
-```json
-{
-  "skills": {
-    "entries": {
-      "douyin-single-video-fetcher": {
-        "enabled": true,
-        "env": {
-          "TIKHUB_API_TOKEN": "your_tikhub_token",
-          "MYSQL_DSN": "mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4"
-        }
-      },
-      "douyin-video-harvester": {
-        "enabled": true,
-        "env": {
-          "TIKHUB_API_TOKEN": "your_tikhub_token",
-          "MYSQL_DSN": "mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4"
-        }
-      },
-      "douyin-shot-analysis-kb": {
-        "enabled": true,
-        "env": {
-          "TIKHUB_API_TOKEN": "your_tikhub_token",
-          "MYSQL_DSN": "mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4"
-        }
-      },
-      "douyin-hot-video-script-generator": {
-        "enabled": true
-      },
-      "douyin-subscription-manager": {
-        "enabled": true,
-        "env": {
-          "TIKHUB_API_TOKEN": "your_tikhub_token",
-          "MYSQL_DSN": "mysql://user:password@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4"
-        }
-      }
-    }
-  }
-}
-```
-
-## 每个 skill 是什么，怎么用
-
-### 1. `douyin-single-video-fetcher`
-
-用途：
-
-- 获取一条抖音视频
-- 保存 TikHub 原始响应到本地 JSON
-- 提取高价值字段写入 MySQL
-- 下载视频和音乐到本地
-- 下载完成后立即生成一份本地 Markdown 分析文档
-
-适合场景：
-
-- 只看一条视频
-- 测试单条作品流水线是否正常
-- 想快速落一条视频的本地记录
-
-输入优先级：
-
-1. `aweme_id`
-2. 单条视频分享链接
-3. 含链接的分享文本
-4. 单条视频 URL
-
-#### 推荐脚本
-
-主入口脚本：
-
-```text
-douyin-single-video-fetcher/scripts/pipeline_ingest_single_video.py
-```
-
-辅助脚本：
-
-```text
-douyin-single-video-fetcher/scripts/fetch_single_video.py
-douyin-single-video-fetcher/scripts/read_local_md.py
-```
-
-#### 最小测试
-
-你已经拿到 TikHub 的单视频原始 JSON 时，可以先测单条流水线：
+#### 跳过系统依赖安装
 
 ```bash
-python ./douyin-single-video-fetcher/scripts/pipeline_ingest_single_video.py \
-  /path/to/raw_payload.json \
-  --mysql-dsn "$MYSQL_DSN" \
-  --endpoint-name fetch_one_video_v2 \
-  --source-input 'https://v.douyin.com/xxxx/'
+bash install.sh --skip-system-deps
 ```
 
-这条命令会做这些事：
 
-- 从原始 JSON 解析核心字段
-- 创建博主目录
-- 保存标准化 JSON
-- 更新 MySQL
-- 下载视频和音乐
-- 生成对应的 Markdown 分析文档
+### 3）Qdrant 安装说明
 
-### 2. `douyin-video-harvester`
+这版 `install.sh` 参考了你给的安装脚本思路，补上了 **Qdrant 的安装 / 启动 / 健康检查**。
 
-用途：
+- `QDRANT_MODE=server` 时，会通过 Docker 执行 `docker pull qdrant/qdrant`，然后启动本机容器，并检查 `${QDRANT_URL}/collections`。
+- `QDRANT_MODE=local` 时，不启动服务端，而是准备本地持久化目录，供 Haystack 的 Qdrant Local 模式直接使用。
+- `QDRANT_MODE=memory` 时，不安装服务端，也不持久化，只用于测试。
 
-- 抓取一个抖音账号的作品列表
-- 支持全量历史抓取
-- 支持从订阅开始时间起做增量抓取
-- 作为整号级别的数据入口
-
-适合场景：
-
-- 需要一个博主的全部视频
-- 需要从订阅开始持续跟踪新增作品
-
-典型模式：
-
-- `backfill_all`：补抓历史视频
-- `latest_only`：从当前开始只追踪新增视频
-
-它和 `douyin-single-video-fetcher` 的区别很直接：
-
-- `douyin-single-video-fetcher` 只负责一条视频
-- `douyin-video-harvester` 负责一个账号的作品集合
-
-### 3. `douyin-subscription-manager`
-
-用途：
-
-- 管理抖音账号订阅记录
-- 记录订阅模式
-- 记录订阅起始时间
-- 为后续同步提供状态基础
-
-适合场景：
-
-- 你想“先订阅，再同步”
-- 你需要区分“历史回补”和“只看新增”
-
-它管理的是“追踪关系”，不是下载本身。
-
-### 4. `douyin-shot-analysis-kb`
-
-用途：
-
-- 读取本地 Markdown 分析文档
-- 汇总一个博主的多条视频分析结果
-- 生成知识库 JSON 和 Markdown
-- 为后续脚本生成提供可复用模式
-
-它不是直接读 TikHub 原始响应来做知识库，而是**优先读取本地 `analysis_md/`**。
-
-#### 主要脚本
-
-```text
-douyin-shot-analysis-kb/scripts/build_kb.py
-douyin-shot-analysis-kb/scripts/build_kb_from_md.py
-douyin-shot-analysis-kb/scripts/query_kb.py
-```
-
-#### 典型用法
-
-从某个博主的 MD 目录构建知识库：
+如果你机器上没有 Docker，又想走本机服务端，请先安装 Docker，再执行：
 
 ```bash
-python ./douyin-shot-analysis-kb/scripts/build_kb_from_md.py \
-  ./~/.openclaw/workspace/data/creators/techoldman/analysis_md \
-  ./~/.openclaw/workspace/data/creators/techoldman/kb
+QDRANT_MODE=server bash install.sh
 ```
 
-输出一般包括：
+---
 
-- `knowledge-base.json`
-- `knowledge-base.md`
+## 四、运行环境
 
-### 5. `douyin-hot-video-script-generator`
+- Python >= 3.9
+- MySQL 5.7+（可选，用于媒体与任务落库）
+- Haystack + Qdrant（推荐本地模式）
+- OpenClaw 的 OpenAI 兼容模型端点，或标准 OpenAI 兼容端点
+- TikHub（可选，用于远程抓取）
+- 火山引擎 Ark（可选，用于视频生成）
 
-用途：
+### 关于 MySQL
 
-- 读取知识库
-- 结合用户主题、目标受众、目标动作
-- 生成一版短视频脚本草案
+安装脚本 **不会**：
 
-它不直接抓 TikHub 数据，而是使用前面已经沉淀下来的知识库。
+- 创建数据库
+- 删除表
+- 覆盖表结构
+- 执行 `db/*.sql`
 
-#### 主要脚本
+数据库由你自己控制。
 
-```text
-douyin-hot-video-script-generator/scripts/generate_script.py
-```
+---
 
-#### 典型用法
+## 五、`~/.openclaw/.env` 完整配置说明
 
-先准备一个请求文件 `request.json`：
+推荐把下面这些配置写到 `~/.openclaw/.env`。如果你有多个独立 workspace，也可以放在当前项目的 `.env`。
 
-```json
-{
-  "topic": "产品经理如何开始做副业",
-  "audience": "上班族",
-  "goal": "提高完播和互动"
-}
-```
+### 1）最小可用配置
 
-再执行：
+如果你只想先跑“本地 RAG + 脚本生成”，最小配置通常是：
 
-```bash
-python ./douyin-hot-video-script-generator/scripts/generate_script.py \
-  ./~/.openclaw/workspace/data/creators/techoldman/kb/knowledge-base.json \
-  ./request.json
-```
-
-
-### 6. `douyin-news-video-director`
-
-用途：
-
-- 读取一个或多个已有知识库
-- 围绕外部新闻生成新的短视频角度
-- 产出完整脚本、分镜和模型提示词
-- 调用火山引擎视频生成接口并下载结果到本地
-
-主要脚本：
-
-```text
-douyin-news-video-director/scripts/generate_news_video.py
-```
-
-输出目录默认位于：
-
-```text
-~/.openclaw/workspace/data/creators/<creator-slug>/generated_scripts/news_video/
-~/.openclaw/workspace/data/creators/<creator-slug>/generated_videos/news_video/
-```
-
-## 推荐工作流
-
-### 工作流 A：先跑单条视频
-
-适合先验证整个项目能不能跑通。
-
-1. 准备一条单视频的 TikHub 原始 JSON
-2. 运行 `pipeline_ingest_single_video.py`
-3. 检查本地目录是否生成：
-   - raw JSON
-   - normalized JSON
-   - 下载的视频
-   - 下载的音乐
-   - Markdown 分析文档
-4. 检查 MySQL 中相关表是否有记录
-
-### 工作流 B：订阅博主并持续追踪
-
-1. 用 `douyin-subscription-manager` 建立订阅关系
-2. 选择订阅模式：
-   - `backfill_all`
-   - `latest_only`
-3. 用 `douyin-video-harvester` 抓取作品列表
-4. 对每条视频继续走单视频入库流水线
-5. 周期性同步新作品
-
-### 工作流 C：构建知识库并生成脚本
-
-1. 确保某个博主已经有足够多的 `analysis_md/*.md`
-2. 用 `douyin-shot-analysis-kb` 构建知识库
-3. 用 `douyin-hot-video-script-generator` 基于知识库生成脚本
-
-## 项目当前的真实能力边界
-
-这部分我直接说清楚，避免你误判。
-
-### 现在已经能做的
-
-- 保存 TikHub 原始响应
-- 本地保存原始 JSON 和标准化 JSON
-- 把视频 URL、音乐 URL、路径和状态写入 MySQL
-- 按博主分组保存视频和音乐文件
-- 为每条视频生成一个本地 Markdown 分析文档
-- 读取本地 Markdown 构建知识库
-- 基于知识库生成脚本草案
-
-### 现在不能装作已经做完的
-
-- 不能仅凭 TikHub 元数据就准确识别全部运镜
-- 不能只靠文案就得出可靠的视觉拍摄结论
-- 不能保证“生成的脚本一定爆”
-
-你要做真正的拍摄方法、镜头语言、节奏踩点分析，还要继续扩展：
-
-- `opencv-python`
-- `librosa`
-- 音频转写
-- 视觉模型或多模态模型
-
-目前这套项目已经把“数据链路”和“存储协议”搭好了，后续增强分析能力只是在这条链上继续加能力，而不是推翻重来。
-
-## 常见问题
-
-### 为什么本地还要保存原始 JSON？
-
-因为数据库不是证据仓库。数据库只存高价值字段和状态，原始 JSON 才是完整留痕。
-
-### 为什么后续分析优先读 Markdown，而不是直接读原始 JSON？
-
-因为原始 JSON 更适合回查和补解析，不适合每次都重新做语义层分析。Markdown 是为“反复阅读和下游复用”准备的。
-
-### 为什么每个博主一个目录？
-
-因为这是最稳的组织方式。否则多个博主混在一起，后面清理、增量抓取、知识库构建都会越来越乱。
-
-### 为什么音乐和视频要同时存本地和数据库？
-
-- 本地存文件，是为了真正拥有素材
-- 数据库存 URL 和本地路径，是为了检索、状态管理和后续调度
-
-## 下一步建议
-
-最务实的做法是：
-
-1. 先跑通单条视频流水线
-2. 再接整号抓取
-3. 再构建知识库
-4. 最后再做脚本生成和更深的镜头分析
-
-不要一开始就把所有增强分析都堆进来。先让这条链稳定，再谈更复杂的视觉和音乐理解。
-
-
-## Ark 图生视频最小配置
-
-`douyin-news-video-director` 现在按你给的 Ark 图生视频接口固定实现，不再要求一长串视频生成环境变量。
-
-放在 `~/.openclaw/.env` 里的最小配置只有：
-
-```bash
+```dotenv
 OPENCLAW_WORKSPACE_DATA_ROOT=~/.openclaw/workspace/data
-ARK_API_KEY=你的_ARK_API_KEY
+HAYSTACK_QDRANT_MODE=local
+HAYSTACK_QDRANT_PATH=~/.openclaw/workspace/data/qdrant_local
+HAYSTACK_EMBEDDER_BACKEND=openai
+OPENCLAW_API_BASE=http://127.0.0.1:11434/v1
+OPENCLAW_MODEL=your-chat-model
+OPENCLAW_EMBEDDING_MODEL=your-embedding-model
 ```
 
-说明：
+### 2）完整配置项
 
-- `ARK_API_KEY` 是唯一必需的火山引擎配置。
-- 代码里已经固定：
-  - 提交接口：`https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`
-  - 查询接口：`https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}`
-  - 请求方法：`POST`
-  - 查询方法：`GET`
-  - 模型：`doubao-seedance-1-5-pro-251215`
-  - 默认时长：`5` 秒
-- 之前那些 `VOLCENGINE_VIDEO_*` 环境变量，当前这版不再需要你手工配置。
+#### A. 数据根目录与本地资产
 
-图生视频仍然需要在请求里提供可访问的 `reference_image_url`。这是业务输入，不是环境变量。
+| 配置项 | 是否必需 | 作用 | 推荐值/说明 |
+|---|---:|---|---|
+| `OPENCLAW_WORKSPACE_DATA_ROOT` | 强烈推荐 | 所有本地数据、registry、脚本、渲染结果的根目录 | `~/.openclaw/workspace/data` |
+| `OPENCLAW_DATA_ROOT` | 可选 | `OPENCLAW_WORKSPACE_DATA_ROOT` 的兼容别名 | 一般不需要同时设置 |
+| `MYSQL_DSN` | 可选 | MySQL 媒体索引与任务落库 | `mysql://user:pass@127.0.0.1:3306/openclaw_douyin?charset=utf8mb4` |
 
+#### B. Qdrant / Haystack 向量库
 
-## RAG 知识库已升级为 Haystack + Qdrant
+| 配置项 | 是否必需 | 作用 | 推荐值/说明 |
+|---|---:|---|---|
+| `HAYSTACK_QDRANT_MODE` | 推荐 | Qdrant 运行模式 | `server`、`local`、`memory` |
+| `HAYSTACK_QDRANT_PATH` | `local` 模式必需 | Qdrant Local 落盘目录 | `~/.openclaw/workspace/data/qdrant_local` |
+| `QDRANT_URL` | `server` 模式必需 | Qdrant 服务端地址 | `http://127.0.0.1:6333` |
+| `QDRANT_API_KEY` | 可选 | 远程/鉴权 Qdrant 时使用 | 本地通常留空 |
+| `HAYSTACK_QDRANT_COLLECTION_PREFIX` | 可选 | collection 前缀 | 默认 `douyin_creator` |
 
-这次版本开始，`douyin-shot-analysis-kb` 不再把 `knowledge-base.json` 当成唯一知识库本体。真正的知识库存储和检索改成：
+#### C. Embedding 与生成模型
 
-- **Haystack** 负责文档切块、向量化和检索流程
-- **Qdrant** 负责本地向量数据库存储
-- `knowledge-base.json` 现在是 **manifest**，记录 collection、embedding 模型、视频索引和数据集范围
+这里支持两套命名：
 
-### 默认工作方式
+- **OpenClaw 兼容命名**：`OPENCLAW_*`
+- **标准 OpenAI 兼容命名**：`OPENAI_*`
 
-1. 从 `analysis_md/*.md` 读取人类报告和结构化 JSON 附录
-2. 按章节切块，并生成补充的结构化事实 chunk
-3. 用 Haystack embedder 生成向量
-4. 写入本地 Qdrant collection
-5. 后续 `query_kb.py` 和 `generate_script.py` 都从 Qdrant 检索，而不是只读本地 JSON
+如果两套都填，代码会优先读取 `OPENAI_*`，再回落到 `OPENCLAW_*`。你最好固定只用一套，别混着配。
 
-### 默认依赖与回退策略
+| 配置项 | 是否必需 | 作用 | 推荐值/说明 |
+|---|---:|---|---|
+| `HAYSTACK_EMBEDDER_BACKEND` | 推荐 | Embedding 后端 | `openai` 或 `sentence_transformers` |
+| `HAYSTACK_EMBEDDING_MODEL` | `sentence_transformers` 推荐 | 本地嵌入模型名 | 默认 `BAAI/bge-small-zh-v1.5` |
+| `OPENCLAW_API_BASE` | OpenClaw 路线推荐 | OpenAI 兼容推理端点 | 例如 `http://127.0.0.1:11434/v1` |
+| `OPENCLAW_API_KEY` | 视你的网关而定 | OpenAI 兼容接口的 key | 本地无鉴权可不填 |
+| `OPENCLAW_MODEL` | 推荐 | 聊天/生成模型名 | 例如你的本地 chat model |
+| `OPENCLAW_EMBEDDING_MODEL` | `openai` backend 推荐 | embedding 模型名 | 例如你的本地 embedding model |
+| `OPENAI_API_BASE` | 可选 | 标准 OpenAI 兼容 base URL | 与 OpenClaw 二选一 |
+| `OPENAI_API_KEY` | 可选 | 标准 OpenAI 兼容 key | 与 OpenClaw 二选一 |
+| `OPENAI_MODEL` | 可选 | 标准 OpenAI 兼容聊天模型名 | 与 OpenClaw 二选一 |
+| `OPENAI_EMBEDDING_MODEL` | 可选 | 标准 OpenAI 兼容 embedding 模型名 | 与 OpenClaw 二选一 |
+| `OPENAI_BASE_URL` | 可选 | `OPENAI_API_BASE` 兼容别名 | 不推荐与前者同时混用 |
+| `MODEL` | 可选 | LLM 模型最终回退值 | 不推荐单独依赖它 |
 
-- 默认 embedding 后端：`sentence-transformers`
-- 默认 embedding 模型：`BAAI/bge-small-zh-v1.5`
-- 如果你已经有 OpenClaw / OpenAI 兼容端点，并设置了：
-  - `OPENAI_API_KEY`
-  - `OPENAI_API_BASE`
-  - `OPENAI_MODEL`
-  - `OPENAI_EMBEDDING_MODEL`
+#### D. TikHub 抓取
 
-  那么 KB 查询回答和脚本生成会优先走你现有的基座模型/嵌入模型。
+| 配置项 | 是否必需 | 作用 | 推荐值/说明 |
+|---|---:|---|---|
+| `TIKHUB_API_TOKEN` | 用到抓取时必需 | TikHub Bearer Token | 你的 TikHub token |
+| `TIKHUB_BASE_URL` | 可选 | TikHub API 根地址 | 默认 `https://api.tikhub.io` |
 
-### Qdrant Docker
+#### E. 火山引擎视频生成
 
-`install.sh` 会尽量自动拉起一个本地 Qdrant 容器，默认：
+| 配置项 | 是否必需 | 作用 | 推荐值/说明 |
+|---|---:|---|---|
+| `ARK_API_KEY` | 推荐 | Ark API Key 主字段 | 你的火山引擎 key |
+| `VOLCENGINE_ARK_API_KEY` | 可选 | `ARK_API_KEY` 兼容别名 | 二选一即可 |
+| `VOLCENGINE_ARK_BASE_URL` | 可选 | Ark Base URL | 默认 `https://ark.cn-beijing.volces.com/api/v3` |
+| `ARK_BASE_URL` | 可选 | `VOLCENGINE_ARK_BASE_URL` 兼容别名 | 二选一即可 |
+| `VOLCENGINE_VIDEO_MODEL` | 可选 | 图生视频模型名 | 默认 `doubao-seedance-1-5-pro-251215` |
+| `ARK_MODEL` | 可选 | `VOLCENGINE_VIDEO_MODEL` 兼容别名 | 二选一即可 |
+| `VOLCENGINE_VIDEO_DURATION_SECONDS` | 可选 | 生成时长上限 | 默认 `5` |
+| `ARK_MAX_DURATION_SECONDS` | 可选 | 时长兼容别名 | 二选一即可 |
 
-- 容器名：`douyin-qdrant`
-- HTTP: `6333`
-- gRPC: `6334`
-- 持久化目录：`~/.openclaw/workspace/qdrant_storage`
+---
 
-如果你不想自动启动：
+## 六、推荐安装组合
+
+### 方案 1：最稳的本地开发组合
+
+- `HAYSTACK_QDRANT_MODE=local`
+- `HAYSTACK_EMBEDDER_BACKEND=openai`
+- `OPENCLAW_API_BASE` 指向你的 OpenClaw 基座模型
+- TikHub / 火山引擎先不配
+
+安装：
 
 ```bash
-SKIP_QDRANT=1 bash ./install.sh
+bash install.sh --qdrant-mode server
 ```
 
-### 新的 KB 产物
+### 方案 2：本机 Docker Qdrant 服务端
 
-构建后会得到：
+- `HAYSTACK_QDRANT_MODE=server`
+- `QDRANT_URL=http://127.0.0.1:6333`
 
-- `~/.openclaw/workspace/data/creators/<creator-slug>/kb/knowledge-base.json`
-- `~/.openclaw/workspace/data/creators/<creator-slug>/kb/knowledge-base.md`
-- `~/.openclaw/workspace/data/creators/<creator-slug>/kb/video-index.json`
-
-其中 `knowledge-base.json` 主要记录：
-
-- `creator_slug`
-- `qdrant.collection_name`
-- `qdrant.embedding_backend`
-- `qdrant.embedding_model`
-- `qdrant.embedding_dim`
-- `dataset.video_count`
-- `dataset.chunk_count`
-
-### 推荐命令
+安装：
 
 ```bash
-python ./douyin-shot-analysis-kb/scripts/build_kb_from_md.py   ~/.openclaw/workspace/data/creators/<creator-slug>/analysis_md
+bash install.sh --qdrant-mode server
 ```
 
-```bash
-python ./douyin-shot-analysis-kb/scripts/query_kb.py   ~/.openclaw/workspace/data/creators/<creator-slug>/kb/knowledge-base.json   "这个账号最常见的开头是什么？"
-```
+### 方案 3：只跑测试
 
 ```bash
-python ./douyin-hot-video-script-generator/scripts/generate_script.py   ~/.openclaw/workspace/data/creators/<creator-slug>/kb/knowledge-base.json   /path/to/request.json
+bash install.sh --qdrant-mode local --skip-system-deps
 ```
+
+---
+
+## 七、安装完成后下一步做什么
+
+1. 激活虚拟环境
+
+```bash
+source .venv/bin/activate
+```
+
+2. 校验包本身
+
+```bash
+python scripts/validate_package.py
+```
+
+3. 继续看 `how_to_use.md`
+
+里面有：
+
+- ingest 示例
+- build-kb 示例
+- query-kb 示例
+- script package 生成示例
+- render 示例
+
+---
+
+## 八、先看哪里
+
+- `how_to_use.md`：具体操作流程与命令示例
+- `Project.md`：设计说明与数据流
+- `docs/review-v3.1.md`：本轮 review 结果
+
+
+## Python 3.9 说明
+
+- 默认只安装 `requirements.txt`，这是 Python 3.9 兼容线。
+- 如需本地 sentence-transformers 嵌入，再手动安装 `requirements.optional-local-embeddings.txt`。
+- 若使用 OpenClaw / OpenAI 兼容接口做 embedding，可不安装本地 transformers 栈。
